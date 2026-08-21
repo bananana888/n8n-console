@@ -73,6 +73,7 @@ function Get-Config {
             NodeVersion = 'v22.22.2'
             ToolsDir    = 'tools'   # 便携 node 解压目录（相对 Console.Home）
             Steps       = @()       # 检测/安装步骤数组
+            InstallTimeoutSec = 600 # 每步安装超时（秒），受限环境超时直接报错不卡死
         }
     }
 
