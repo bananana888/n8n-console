@@ -126,15 +126,17 @@ function Start-ManagedService {
         return @{ Ok = $false; Message = $msg; PID = 0 }
     }
 
-    # 定位可执行文件：绝对路径优先（PATH 里的同名命令可能版本不对），否则回退 PATH 查找
+    # 定位可执行文件：便携 node 优先（Setup 自动装到 tools\ 的，优先于配置/系统 PATH），
+    # 否则用配置的 Executable（绝对路径优先，PATH 兜底）
+    $cfgExe = Get-NodeExecutable
     $exePath = $null
-    if ([IO.Path]::IsPathRooted($srv.Executable) -and (Test-Path $srv.Executable)) {
-        $exePath = $srv.Executable
+    if ([IO.Path]::IsPathRooted($cfgExe) -and (Test-Path $cfgExe)) {
+        $exePath = $cfgExe
     } else {
-        $exePath = (Get-Command $srv.Executable -ErrorAction SilentlyContinue).Source
+        $exePath = (Get-Command $cfgExe -ErrorAction SilentlyContinue).Source
     }
     if (-not $exePath) {
-        $msg = "未找到命令 $($srv.Executable)，请确认路径正确或已加入 PATH。"
+        $msg = "未找到命令 $($cfgExe)，请确认路径正确或已加入 PATH。"
         Write-FatalLog "启动失败: $msg"
         return @{ Ok = $false; Message = $msg; PID = 0 }
     }

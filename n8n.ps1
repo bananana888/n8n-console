@@ -26,6 +26,7 @@ $script:Config = Get-Config -Root $PSScriptRoot
 # ---------- 点源 lib (共享同一会话作用域, 规避模块作用域坑) ----------
 . (Join-Path $PSScriptRoot "lib\logging.ps1")
 . (Join-Path $PSScriptRoot "lib\service.ps1")
+. (Join-Path $PSScriptRoot "lib\setup.ps1")
 . (Join-Path $PSScriptRoot "lib\gui.ps1")
 
 # ---------- 提示工具 (Silent 时只写日志) ----------
@@ -50,6 +51,31 @@ function Show-YesNo([string]$msg) {
 try {
     switch ($Action.ToLower()) {
         "start" {
+            # 环境自检：缺依赖则自动安装（控制台"工具箱"能力）
+            $missing = Test-SetupNeeded
+            if ($missing.Count -gt 0) {
+                $names = ($missing | ForEach-Object { $_.Name }) -join "、"
+                if ($Silent) {
+                    Write-FatalLog "环境缺失，需要安装: $names。请打开控制台 GUI 触发自动安装。"
+                    Show-Msg "环境缺失，需要安装: $names`n`n请打开控制台 GUI，点"启动"触发自动安装。"
+                    return
+                }
+                if (Show-YesNo "检测到缺少环境: $names`n`n需要自动安装，是否继续？") {
+                    Write-CtrlLog "开始自动安装: $names"
+                    try { Invoke-Setup } catch {
+                        Write-FatalLog "自动安装异常: $($_.Exception.Message)"
+                        Show-Msg "自动安装异常: $($_.Exception.Message)`n详见 logs\setup.log"
+                        return
+                    }
+                    if ((Test-SetupNeeded).Count -gt 0) {
+                        Show-Msg "环境安装未完成，请检查 logs\setup.log"
+                        return
+                    }
+                    Write-CtrlLog "环境安装完成，继续启动"
+                } else {
+                    return
+                }
+            }
             $r = Start-ManagedService
             if ($r.Ok -and -not $Silent) {
                 try { Start-Process $script:Config.Service.EditorUrl } catch { }

@@ -205,6 +205,7 @@ python D:\APP\n8n-console\create_shortcut.py
 | 2026-08-21 | 启动提速 + 防御性：稳定性复检 8s→4s、健康轮询 800→500ms、**进程死亡立即判失败**（启动即退场景 30s→0.5s）、**exe 启动预检**（`--version` 给明确报错）；窗体改用 `ClientSize`+`AutoScaleMode=None` 修复右边截断 |
 | 2026-08-21 | 修复**永久黄灯**：异步 job 完成判定误用 `PowerShell.HasCompleted`（该属性不存在返回 $null），改用 `IAsyncResult.IsCompleted` + 90s 超时兜底 |
 | 2026-08-21 | 启动/停止结果改为**内联 toast**（复用底部提示行，4s 自动恢复，成功绿/失败红），不再弹 MessageBox；仅"详情"保留弹窗 |
+| 2026-08-21 | **环境自检 + 自动安装**（工具箱能力）：点启动检测 node/n8n 缺失 → 弹确认 → 后台自动装（便携 node 到 tools\ + npm install n8n + 数据初始化）→ 窗口内进度条实时展示 → 装完自动继续启动。配置在 `n8n.config.psd1` 的 `Setup` 段（通用，每服务一份） |
 
 ---
 

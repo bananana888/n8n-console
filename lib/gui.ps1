@@ -19,6 +19,12 @@ $script:_bgPollTimer = $null    # 轮询后台 job 完成的 UI Timer
 $script:_bgStartTime = $null    # 后台任务开始时间（超时兜底用）
 $script:_toastTimer = $null     # 内联提示恢复 Timer（Show-Toast 惰性创建）
 $script:_hintText = ""          # 底部提示默认文案（toast 临时覆盖后恢复）
+$script:_setupJob = $null       # 后台安装 job（[PowerShell] runspace）
+$script:_setupHandle = $null
+$script:_setupTimer = $null     # 安装进度轮询 UI Timer
+$script:_setupPanel = $null     # 安装进度面板（进度条 + 阶段文本）
+$script:_pbSetup = $null
+$script:_lblSetup = $null
 $script:StateRunning = $false
 $script:StatePort = $false
 # 注意: StateDotColor 不能在文件顶层初始化（点源时 System.Drawing 尚未 Add-Type，会 TypeNotFound），在 Show-Gui 里初始化
@@ -47,8 +53,8 @@ function Show-Toast([string]$msg, [bool]$isError = $false) {
 }
 
 function Invoke-ManagedStart {
-    # 正在后台启动，防重复
-    if ($script:_bgJob) { return }
+    # 正在后台启动/安装，防重复
+    if ($script:_bgJob -or $script:_setupJob) { return }
 
     $s = Get-ManagedStatus
     if ($s.Running) {
@@ -56,7 +62,23 @@ function Invoke-ManagedStart {
         return
     }
 
-    # 立即反馈"启动中"，后台执行真正的启动（UI 不冻结）
+    # 环境自检：缺依赖则引导自动安装（控制台"工具箱"能力）
+    $missing = Test-SetupNeeded
+    if ($missing.Count -gt 0) {
+        $names = ($missing | ForEach-Object { $_.Name }) -join "、"
+        if (Show-YesNo "检测到缺少环境: $names`n`n需要自动安装，是否继续？") {
+            Start-SetupJob
+        }
+        return
+    }
+    Start-BackgroundService
+}
+
+# 环境就绪后的正常启动（后台 runspace，UI 不冻结）
+function Start-BackgroundService {
+    if ($script:_bgJob) { return }
+
+    # 立即反馈"启动中"
     $script:StateRunning = $true
     $script:StatePort = $false
     $script:_lblState.Text = "启动中..."
@@ -72,6 +94,7 @@ function Invoke-ManagedStart {
     [void]$ps.AddScript("`$script:Config = Get-Config -Root '$homeDir'")
     [void]$ps.AddScript(". '$homeDir\lib\logging.ps1'")
     [void]$ps.AddScript(". '$homeDir\lib\service.ps1'")
+    [void]$ps.AddScript(". '$homeDir\lib\setup.ps1'")   # 提供 Get-NodeExecutable
     [void]$ps.AddScript("`$r = Start-ManagedService; Write-Output `$r")
     $script:_bgJob = $ps
     $script:_bgHandle = $ps.BeginInvoke()
@@ -84,6 +107,76 @@ function Invoke-ManagedStart {
         $script:_bgPollTimer.Add_Tick({ Test-BgJobDone })
     }
     $script:_bgPollTimer.Start()
+}
+
+# 自动安装环境（后台 runspace；进度写进度文件，GUI 500ms 轮询）
+function Start-SetupJob {
+    if ($script:_setupJob) { return }
+
+    # 显示安装面板
+    if ($script:_setupPanel) { $script:_setupPanel.Visible = $true }
+    if ($script:_pbSetup) { $script:_pbSetup.Style = 'Continuous'; $script:_pbSetup.Value = 0 }
+    if ($script:_lblSetup) { $script:_lblSetup.Text = "正在检测环境..." }
+    $script:_lblState.Text = "安装中..."
+    $script:_lblState.ForeColor = [System.Drawing.Color]::FromArgb(180, 130, 0)
+
+    # 清除旧进度
+    Remove-Item (Get-SetupProgressFile) -Force -ErrorAction SilentlyContinue
+
+    $homeDir = $script:Config.Paths.Home
+    $ps = [System.Management.Automation.PowerShell]::Create()
+    [void]$ps.AddScript(". '$homeDir\lib\config.ps1'")
+    [void]$ps.AddScript("`$script:Config = Get-Config -Root '$homeDir'")
+    [void]$ps.AddScript(". '$homeDir\lib\logging.ps1'")
+    [void]$ps.AddScript(". '$homeDir\lib\setup.ps1'")
+    [void]$ps.AddScript("Invoke-Setup")
+    $script:_setupJob = $ps
+    $script:_setupHandle = $ps.BeginInvoke()
+
+    if (-not $script:_setupTimer) {
+        $script:_setupTimer = New-Object System.Windows.Forms.Timer
+        $script:_setupTimer.Interval = 500
+        $script:_setupTimer.Add_Tick({ Test-SetupProgress })
+    }
+    $script:_setupTimer.Start()
+}
+
+# 安装进度轮询：读进度文件 → 更新进度条/阶段文本 → 完成/失败收尾
+function Test-SetupProgress {
+    $pf = Get-SetupProgressFile
+    if (-not (Test-Path $pf)) { return }
+    $p = $null
+    try { $p = Get-Content $pf -Raw | ConvertFrom-Json } catch { return }
+    if (-not $p) { return }
+
+    if ($p.running) {
+        if ($script:_lblSetup) { $script:_lblSetup.Text = "$($p.stepName) - $($p.message)" }
+        if ($p.mode -eq 'marquee') {
+            if ($script:_pbSetup) { $script:_pbSetup.Style = 'Marquee' }
+        } else {
+            if ($script:_pbSetup) {
+                $script:_pbSetup.Style = 'Continuous'
+                $script:_pbSetup.Value = [int]$p.percent
+            }
+        }
+        return
+    }
+
+    # 完成或失败
+    if ($script:_setupTimer) { $script:_setupTimer.Stop() }
+    if ($script:_setupPanel) { $script:_setupPanel.Visible = $false }
+    try { if ($script:_setupJob) { $script:_setupJob.Dispose() } } catch { }
+    $script:_setupJob = $null
+    $script:_setupHandle = $null
+
+    if ($p.done) {
+        Show-Toast "环境安装完成，正在启动..."
+        Start-BackgroundService
+    } else {
+        $err = if ($p.error) { $p.error } else { "环境安装失败，详见 logs\setup.log" }
+        Show-Toast $err $true
+        Refresh-UI
+    }
 }
 
 function Test-BgJobDone {
@@ -320,6 +413,17 @@ function Refresh-UI {
         $script:StatePort = $false
         return
     }
+    if ($script:_setupJob) {
+        # 正在后台安装环境：状态卡显示"安装中"
+        $script:StateRunning = $false
+        $script:StatePort = $false
+        $script:_lblState.Text = "安装中..."
+        $script:_lblState.ForeColor = [System.Drawing.Color]::FromArgb(180, 130, 0)
+        $script:_lblDetail.Text = "正在自动安装所需环境..."
+        $script:_lblUptime.Text = "运行时长: --"
+        if ($script:_dot) { $script:_dot.Invalidate($true) }
+        return
+    }
     $sd = Get-ManagedStatus
     # 供 Paint / 慢闪读取
     $script:StateRunning = $sd.Running
@@ -393,7 +497,7 @@ function Show-Gui {
     $form = New-Object System.Windows.Forms.Form
     $script:_form = $form
     $form.Text = "$($script:Config.Service.Name) 控制台"
-    $form.ClientSize = New-Object System.Drawing.Size(380, 206)
+    $form.ClientSize = New-Object System.Drawing.Size(380, 244)
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
@@ -454,9 +558,37 @@ function Show-Gui {
 
     $form.Controls.Add($card)
 
+    # 安装进度面板（默认隐藏；环境缺失时显示：阶段文本 + 细进度条）
+    $setupPanel = New-Object System.Windows.Forms.Panel
+    $setupPanel.Location = New-Object System.Drawing.Point(12, 116)
+    $setupPanel.Size = New-Object System.Drawing.Size(352, 34)
+    $setupPanel.BackColor = [System.Drawing.Color]::FromArgb(248, 249, 251)
+    $setupPanel.Visible = $false
+    $script:_setupPanel = $setupPanel
+
+    $lblSetup = New-Object System.Windows.Forms.Label
+    $lblSetup.Location = New-Object System.Drawing.Point(0, 0)
+    $lblSetup.Size = New-Object System.Drawing.Size(352, 16)
+    $lblSetup.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 8)
+    $lblSetup.ForeColor = [System.Drawing.Color]::FromArgb(180, 130, 0)
+    $lblSetup.Text = "正在检测环境..."
+    $script:_lblSetup = $lblSetup
+    $setupPanel.Controls.Add($lblSetup)
+
+    $pbSetup = New-Object System.Windows.Forms.ProgressBar
+    $pbSetup.Location = New-Object System.Drawing.Point(0, 18)
+    $pbSetup.Size = New-Object System.Drawing.Size(352, 14)
+    $pbSetup.Minimum = 0
+    $pbSetup.Maximum = 100
+    $pbSetup.Value = 0
+    $script:_pbSetup = $pbSetup
+    $setupPanel.Controls.Add($pbSetup)
+
+    $form.Controls.Add($setupPanel)
+
     # 操作按钮区域
     $flow = New-Object System.Windows.Forms.FlowLayoutPanel
-    $flow.Location = New-Object System.Drawing.Point(12, 122)
+    $flow.Location = New-Object System.Drawing.Point(12, 152)
     $flow.Size = New-Object System.Drawing.Size(352, 45)
     $flow.FlowDirection = 'LeftToRight'
     $flow.BackColor = [System.Drawing.Color]::Transparent
@@ -479,7 +611,7 @@ function Show-Gui {
     $lblHint = New-Object System.Windows.Forms.Label
     $lblHint.Text = "关闭窗口即退出控制台; n8n 若在运行会继续后台运行"
     $script:_hintText = $lblHint.Text
-    $lblHint.Location = New-Object System.Drawing.Point(12, 176)
+    $lblHint.Location = New-Object System.Drawing.Point(12, 212)
     $lblHint.Size = New-Object System.Drawing.Size(352, 16)
     $lblHint.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 8)
     $lblHint.ForeColor = [System.Drawing.Color]::FromArgb(140, 140, 140)
@@ -495,10 +627,15 @@ function Show-Gui {
         try { $script:dotFlashTimer.Stop() } catch { }
         if ($script:_bgPollTimer) { try { $script:_bgPollTimer.Stop() } catch { } }
         if ($script:_toastTimer) { try { $script:_toastTimer.Stop() } catch { } }
-        # 后台启动任务仍在跑则放弃（n8n 进程本身已由独立 runspace 拉起，继续后台运行）
+        if ($script:_setupTimer) { try { $script:_setupTimer.Stop() } catch { } }
+        # 后台任务仍在跑则放弃（n8n 进程本身已由独立 runspace 拉起，继续后台运行）
         if ($script:_bgJob) {
             try { $script:_bgJob.Dispose() } catch { }
             $script:_bgJob = $null
+        }
+        if ($script:_setupJob) {
+            try { $script:_setupJob.Dispose() } catch { }
+            $script:_setupJob = $null
         }
     })
 

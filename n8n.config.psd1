@@ -59,4 +59,62 @@
         Stdout  = 'n8n.log'        # n8n 运行输出 (N8N_LOG_FILE)
         Stderr  = 'n8n-error.log'  # n8n 进程 stderr
     }
+
+    # ---------- 环境自检 + 自动安装（控制台"工具箱"能力）----------
+    # 点启动时检测下列依赖，缺失则弹确认 → 后台自动安装 → 进度条展示 → 装完继续启动。
+    Setup = @{
+        Enabled     = $true
+        # 便携 node 下载镜像（npmmirror，国内快）
+        NodeMirror  = 'https://npmmirror.com/mirrors/node/'
+        # npm 包源
+        NpmRegistry = 'https://registry.npmmirror.com'
+        # 需要的 node 版本（n8n 2.35.4 要求 >=22.22）
+        NodeVersion = 'v22.22.2'
+        # 便携 node 解压目录（相对 Console.Home，如 n8n-console\tools\node-v22.22.2）
+        ToolsDir    = 'tools'
+        # 检测/安装步骤（顺序执行；已就绪则跳过）
+        Steps = @(
+            @{
+                Name = 'node 运行时'
+                Detect = 'node 可执行且版本 >=22.22'
+                Install = @{
+                    Kind = 'node-portable'   # 内置类型：下载 zip + 解压到 ToolsDir\node-<版本>
+                }
+            },
+            @{
+                Name = 'n8n 本体'
+                Detect = 'D:\APP\n8n\node_modules\n8n 存在'
+                Install = @{
+                    Kind    = 'npm-install'   # 内置类型：用便携 node 的 npm 安装
+                    Package = 'n8n@2.35.4'
+                    Prefix  = 'D:\APP\n8n'
+                }
+            },
+            @{
+                Name = 'n8n 数据与配置'
+                Detect = 'D:\APP\n8n\.n8n\.n8n 存在'
+                Install = @{
+                    Kind = 'shell'           # 内置类型：执行 PowerShell 命令
+                    DetectScript = 'Test-Path "D:\APP\n8n\.n8n\.n8n"'
+                    Script = @'
+# n8n 数据目录与运行配置初始化（已存在则跳过）
+$n8nHome = "D:\APP\n8n"
+$dataDir = "$n8nHome\.n8n"
+if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null }
+# package.json（npm start/stop 入口）
+if (-not (Test-Path "$n8nHome\package.json")) {
+    @{
+        name = "n8n"; version = "1.0.0"; private = $true
+        scripts = @{ start = "node node_modules/n8n/bin/n8n start"; stop = "node node_modules/n8n/bin/n8n stop" }
+    } | ConvertTo-Json | Set-Content "$n8nHome\package.json" -Encoding UTF8
+}
+# .npmrc（镜像源 + 项目内缓存，绕开系统缓存锁）
+if (-not (Test-Path "$n8nHome\.npmrc")) {
+    "registry=https://registry.npmmirror.com`ncache=D:\APP\n8n\.npm-cache" | Set-Content "$n8nHome\.npmrc" -Encoding UTF8
+}
+'@
+                }
+            }
+        )
+    }
 }

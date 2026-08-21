@@ -61,6 +61,15 @@ function Get-Config {
             Stdout  = 'n8n.log'
             Stderr  = 'n8n-error.log'
         }
+        # 环境自检 + 自动安装（每服务一个 Setup 段；Enabled=$false 时跳过检测）
+        Setup = @{
+            Enabled     = $false
+            NodeMirror  = 'https://npmmirror.com/mirrors/node/'
+            NpmRegistry = 'https://registry.npmmirror.com'
+            NodeVersion = 'v22.22.2'
+            ToolsDir    = 'tools'   # 便携 node 解压目录（相对 Console.Home）
+            Steps       = @()       # 检测/安装步骤数组
+        }
     }
 
     # 加载用户配置文件
@@ -74,6 +83,8 @@ function Get-Config {
         }
     }
     $cfg = Merge-Deep $defaults $user
+    # 实例名 = 配置文件名去掉扩展名（如 n8n.config.psd1 -> n8n），用于运行时文件/进度文件区分
+    $cfg.Instance = [IO.Path]::GetFileNameWithoutExtension([IO.Path]::GetFileNameWithoutExtension($cfgFile))
 
     # 解析绝对路径（注意: 不用 $home 作变量名，它是 PowerShell 只读自动变量）
     $homeDir = $cfg.Console.Home
@@ -109,6 +120,13 @@ function Get-Config {
     # N8N_LOG_FILE 未显式配置时，从 Logs.Stdout 推导绝对路径
     if (-not $cfg.Service.Env.ContainsKey('N8N_LOG_FILE')) {
         $cfg.Service.Env['N8N_LOG_FILE'] = $cfg.Paths.StdoutLog
+    }
+
+    # Setup.ToolsDir 解析为绝对路径（相对 Console.Home）
+    if (-not [string]::IsNullOrWhiteSpace($cfg.Setup.ToolsDir)) {
+        $toolsDir = $cfg.Setup.ToolsDir
+        if (-not [IO.Path]::IsPathRooted($toolsDir)) { $toolsDir = Join-Path $homeDir $toolsDir }
+        $cfg.Setup.ToolsDir = $toolsDir
     }
 
     return $cfg

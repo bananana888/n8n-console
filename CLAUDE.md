@@ -29,7 +29,8 @@ n8n-console/
 │   ├── config.ps1       Get-Config -Root <控制台根目录>：加载 psd1 + 默认值深度合并 + 路径解析
 │   ├── logging.ps1      日志：Write-CtrlLog（审计 control.log）/ Write-FatalLog（兜底 error.log）
 │   ├── service.ps1      纯进程控制（无 UI，返回结构化 hashtable 结果）
-│   └── gui.ps1          WinForms UI（状态卡片/hover/托盘/1s 刷新）
+│   ├── setup.ps1        环境自检 + 自动安装（Test-SetupNeeded / Invoke-Setup，进度写 run\<实例>.setup.json）
+│   └── gui.ps1          WinForms UI（状态卡片/hover/托盘/1s 刷新 + 安装进度面板）
 ├── assets\n8n.ico
 ├── logs\    run\
 ```
@@ -65,6 +66,12 @@ powershell -ExecutionPolicy Bypass -File D:\APP\n8n-console\n8n.ps1 -Action stat
 
 ### n8n.ps1 —— 入口
 加载配置 → 点源 lib → 定义 `Show-Msg`/`Show-YesNo`（Silent 时只写日志）→ switch 分派。GUI 模式进 `Show-Gui`（阻塞）。顶层 try/catch 兜底写 `logs\error.log`。
+
+### lib/setup.ps1 —— 环境自检 + 自动安装（"工具箱"能力）
+- 每服务在 `n8n.config.psd1` 的 `Setup` 段定义检测/安装步骤（`Steps`），内置类型：`node-portable`（下载 npmmirror node zip 解压到 `tools\node-<版本>`，便携免管理员）、`npm-install`（用便携 node 的 npm 装包）、`shell`（自定义命令）。
+- `Test-SetupNeeded`：点启动时检测缺失步骤（**快**：文件存在 + `--version`）；缺则弹确认 → 后台 `Invoke-Setup` → 进度写 `run\<实例>.setup.json` → GUI 500ms 轮询更新进度条/阶段文本 → 装完自动继续启动。
+- **便携 node 优先**：`Get-NodeExecutable` 返回 `tools\node-<版本>\node.exe`（若存在）否则配置 `Executable`；service.ps1 定位 exe 走它。
+- CLI `-Action start`：缺环境时非 Silent 弹确认同步安装；Silent 只写日志返回失败（不静默下载）。
 
 ### lib/gui.ps1 —— 仅呈现（PS5.1 事件闭包陷阱见踩坑 5）
 - **启动是异步的**：点启动 → 独立 runspace 执行 `Start-ManagedService`（BeginInvoke），500ms 轮询完成，UI 线程不冻结（否则健康检查+稳定性复检会锁死界面 15~38s）。⚠️ 判断 job 完成必须用 `$script:_bgHandle.IsCompleted`（IAsyncResult）；**`PowerShell` 类没有 `HasCompleted` 属性（返回 $null），用它判断会导致 job 永不"完成"→ 界面永久停在黄灯**（2026-08-21 实测 bug）。另有 90s 超时兜底强制清理。
