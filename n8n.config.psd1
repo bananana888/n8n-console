@@ -72,6 +72,8 @@
         NodeVersion = 'v22.22.2'
         # 便携 node 解压目录（相对 Console.Home，如 n8n-console\tools\node-v22.22.2）
         ToolsDir    = 'tools'
+        # 每步安装超时（秒）：受限电脑/网络超时直接报错，不卡死
+        InstallTimeoutSec = 600
         # 检测/安装步骤（顺序执行；已就绪则跳过）
         Steps = @(
             @{

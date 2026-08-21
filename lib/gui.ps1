@@ -414,8 +414,8 @@ function Refresh-UI {
         return
     }
     if ($script:_setupJob) {
-        # 正在后台安装环境：状态卡显示"安装中"
-        $script:StateRunning = $false
+        # 正在后台安装环境：状态卡显示"安装中"（黄灯，同启动中）
+        $script:StateRunning = $true
         $script:StatePort = $false
         $script:_lblState.Text = "安装中..."
         $script:_lblState.ForeColor = [System.Drawing.Color]::FromArgb(180, 130, 0)

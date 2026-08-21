@@ -174,7 +174,14 @@ function Download-File {
         $out = [System.IO.File]::Create($outFile)
         $buf = New-Object byte[] 81920
         $downloaded = [long]0
+        # 读流总超时：受限网络/电脑不卡死，超时直接失败
+        $dlTimeoutSec = if ($script:Config.Setup.InstallTimeoutSec) { $script:Config.Setup.InstallTimeoutSec } else { 600 }
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
         while (($read = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+            if ($sw.Elapsed.TotalSeconds -gt $dlTimeoutSec) {
+                Write-CtrlLog "下载超时(>$dlTimeoutSec s)，已中止"
+                return $false
+            }
             $out.Write($buf, 0, $read)
             $downloaded += $read
             if ($total -gt 0) {
@@ -224,6 +231,14 @@ function Install-NpmPackage {
         $p.StartInfo.RedirectStandardOutput = $true
         $p.StartInfo.RedirectStandardError = $true
         [void]$p.Start()
+        # 安装超时：受限环境不卡死，超时终止进程并报错
+        $npmTimeoutMs = 600000
+        if ($script:Config.Setup.InstallTimeoutSec) { $npmTimeoutMs = $script:Config.Setup.InstallTimeoutSec * 1000 }
+        if (-not $p.WaitForExit($npmTimeoutMs)) {
+            try { $p.Kill() } catch { }
+            Write-CtrlLog "npm install 超时(>$($npmTimeoutMs / 1000) s)，已终止"
+            return $false
+        }
         $out = $p.StandardOutput.ReadToEnd()
         $err = $p.StandardError.ReadToEnd()
         $p.WaitForExit()

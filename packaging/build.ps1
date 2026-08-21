@@ -22,7 +22,7 @@ if (-not (Test-Path $csc)) { $csc = Join-Path $env:windir 'Microsoft.NET\Framewo
 if (-not (Test-Path $csc)) { throw '未找到 csc.exe（需要 .NET Framework）' }
 $smaDll = Join-Path $env:windir 'Microsoft.NET\assembly\GAC_MSIL\System.Management.Automation\v4.0_3.0.0.0__31bf3856ad364e35\System.Management.Automation.dll'
 if (-not (Test-Path $smaDll)) { throw '未找到 System.Management.Automation.dll' }
-& $csc -nologo -target:winexe -out:"$Root\n8n-console.exe" -r:"$smaDll" (Join-Path $PSScriptRoot 'n8n-console.cs')
+& $csc -nologo -target:winexe -win32icon:"$Root\assets\n8n.ico" -out:"$Root\n8n-console.exe" -r:"$smaDll" (Join-Path $PSScriptRoot 'n8n-console.cs')
 if ($LASTEXITCODE -ne 0) { throw "csc 编译失败(退出码 $LASTEXITCODE)" }
 
 Write-Host '==> 1/3 收集待打包文件到 tools\stage' -ForegroundColor Cyan
@@ -58,7 +58,7 @@ if ($LASTEXITCODE -ne 0) { throw "heat 失败(退出码 $LASTEXITCODE)" }
 #      -sice 抑制 per-user 安装的 ICE 建议性检查 ICE38/ICE64/ICE91）
 & $candle (Join-Path $PSScriptRoot 'installer.wxs') (Join-Path $PSScriptRoot 'Components.wxs') -dSourceDir="$stage" -out "$PSScriptRoot/"
 if ($LASTEXITCODE -ne 0) { throw "candle(msi) 失败(退出码 $LASTEXITCODE)" }
-& $light (Join-Path $PSScriptRoot 'installer.wixobj') (Join-Path $PSScriptRoot 'Components.wixobj') -sice:ICE38 -sice:ICE64 -sice:ICE91 -out (Join-Path $release 'setup.msi')
+& $light (Join-Path $PSScriptRoot 'installer.wixobj') (Join-Path $PSScriptRoot 'Components.wixobj') -ext (Join-Path $wixDir 'WixUIExtension.dll') -sice:ICE38 -sice:ICE64 -sice:ICE91 -out (Join-Path $release 'setup.msi')
 if ($LASTEXITCODE -ne 0) { throw "light(msi) 失败(退出码 $LASTEXITCODE)" }
 
 # 3.3 编译 EXE（Burn 引导程序，链装 setup.msi）
