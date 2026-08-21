@@ -1,11 +1,11 @@
 ﻿# ============================================================
-#  build.ps1 - 构建 n8n 控制台安装包（setup.exe + setup.msi）
+#  build.ps1 - 构建 n8n 控制台安装包（n8n-console-setup.exe + setup.msi）
 #
 #  只依赖 WiX v3（zip 便携，无需安装任何东西到系统）：
 #   1) 收集运行文件到 packaging\tools\stage
 #   2) 下载 WiX v3 到 packaging\tools\wix（首次）
 #   3) heat + candle + light  -> release\setup.msi（MSI 安装包）
-#   4) candle + light(Burn)   -> release\setup.exe（引导安装程序，链装 setup.msi）
+#   4) candle + light(Burn)   -> release\n8n-console-setup.exe（引导安装程序，链装 setup.msi）
 #
 #  用法: powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 #  注意: 首次需联网下载 WiX（~30MB）；输出在 release\
@@ -39,7 +39,7 @@ $heat   = Join-Path $wixDir 'heat.exe'
 $candle = Join-Path $wixDir 'candle.exe'
 $light  = Join-Path $wixDir 'light.exe'
 
-Write-Host '==> 3/3 编译 setup.msi + setup.exe（WiX）' -ForegroundColor Cyan
+Write-Host '==> 3/3 编译 setup.msi + n8n-console-setup.exe（WiX）' -ForegroundColor Cyan
 
 # 3.1 从 stage 生成文件组件清单（heat；-out 输出到 packaging\）
 & $heat dir $stage -cg MainComponentGroup -gg -scom -sreg -srd -sui -dr INSTALLFOLDER -var var.SourceDir -out (Join-Path $PSScriptRoot 'Components.wxs')
@@ -56,7 +56,7 @@ if ($LASTEXITCODE -ne 0) { throw "light(msi) 失败(退出码 $LASTEXITCODE)" }
 $msiPath = Join-Path $release 'setup.msi'
 & $candle (Join-Path $PSScriptRoot 'Bundle.wxs') -dMsiPath="$msiPath" -out "$PSScriptRoot/"
 if ($LASTEXITCODE -ne 0) { throw "candle(bundle) 失败(退出码 $LASTEXITCODE)" }
-& $light (Join-Path $PSScriptRoot 'Bundle.wixobj') -ext (Join-Path $wixDir 'WixBalExtension.dll') -out (Join-Path $release 'setup.exe')
+& $light (Join-Path $PSScriptRoot 'Bundle.wixobj') -ext (Join-Path $wixDir 'WixBalExtension.dll') -out (Join-Path $release 'n8n-console-setup.exe')
 if ($LASTEXITCODE -ne 0) { throw "light(bundle) 失败(退出码 $LASTEXITCODE)" }
 
 Write-Host ''

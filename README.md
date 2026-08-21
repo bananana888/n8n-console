@@ -16,7 +16,7 @@ A lightweight Windows desktop console (PowerShell + WinForms) that starts/stops 
 
 ## 安装
 
-1. 下载 [`setup.exe`](release/setup.exe)（或 `setup.msi`）到 Windows x64 电脑
+1. 下载 [`n8n-console-setup.exe`](release/n8n-console-setup.exe)（或 `setup.msi`）到 Windows x64 电脑
 2. 双击安装（默认装到**用户目录**，免管理员，自动创建桌面快捷方式）
 3. 双击桌面「n8n 控制台」→ 点 **▶ 启动**
 
