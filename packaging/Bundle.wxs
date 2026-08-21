@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ============================================================
+     n8n 控制台 引导安装程序（setup.exe）
+     WiX Burn Bootstrapper：内部链式安装 setup.msi
+     编译: candle Bundle.wxs -dMsiPath=... + light -ext WixBalExtension.dll
+     ============================================================ -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:bal="http://schemas.microsoft.com/wix/BalExtension">
+  <Bundle Name="n8n 控制台" Version="4.0.0" Manufacturer="bananana888"
+          UpgradeCode="D3A7F8B2-9C4E-4E1A-8F2B-6C5D9E1A7B3E">
+    <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.RtfLicense" />
+    <Chain>
+      <MsiPackage SourceFile="$(var.MsiPath)" DisplayInternalUI="yes" />
+    </Chain>
+  </Bundle>
+</Wix>

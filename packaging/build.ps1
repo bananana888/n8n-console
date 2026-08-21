@@ -1,14 +1,14 @@
 ﻿# ============================================================
 #  build.ps1 - 构建 n8n 控制台安装包（setup.exe + setup.msi）
 #
-#  流程:
-#   1) 收集运行文件到 packaging\tools\stage（只打包必要文件）
-#   2) 下载/复用打包工具到 packaging\tools（Inno Setup + WiX v3，便携/静默）
-#   3) ISCC 编译 installer.iss  -> release\setup.exe
-#   4) heat + candle + light    -> release\setup.msi
+#  只依赖 WiX v3（zip 便携，无需安装任何东西到系统）：
+#   1) 收集运行文件到 packaging\tools\stage
+#   2) 下载 WiX v3 到 packaging\tools\wix（首次）
+#   3) heat + candle + light  -> release\setup.msi（MSI 安装包）
+#   4) candle + light(Burn)   -> release\setup.exe（引导安装程序，链装 setup.msi）
 #
 #  用法: powershell -ExecutionPolicy Bypass -File packaging\build.ps1
-#  注意: 需要联网下载工具（首次）；输出在 release\
+#  注意: 首次需联网下载 WiX（~30MB）；输出在 release\
 # ============================================================
 $ErrorActionPreference = 'Stop'
 $script:Root = Split-Path $PSScriptRoot -Parent
@@ -16,7 +16,7 @@ $tools = Join-Path $PSScriptRoot 'tools'
 $release = Join-Path $Root 'release'
 New-Item -ItemType Directory -Path $tools, $release -Force | Out-Null
 
-Write-Host '==> 1/4 收集待打包文件到 tools\stage' -ForegroundColor Cyan
+Write-Host '==> 1/3 收集待打包文件到 tools\stage' -ForegroundColor Cyan
 $stage = Join-Path $tools 'stage'
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
@@ -25,19 +25,7 @@ foreach ($f in $files) { Copy-Item (Join-Path $Root $f) $stage -Force }
 Copy-Item (Join-Path $Root 'lib') $stage -Recurse -Force
 Copy-Item (Join-Path $Root 'assets') $stage -Recurse -Force
 
-Write-Host '==> 2/4 准备打包工具（Inno Setup + WiX v3）' -ForegroundColor Cyan
-$innoDir = Join-Path $tools 'inno'
-$iscc = Join-Path $innoDir 'ISCC.exe'
-if (-not (Test-Path $iscc)) {
-    $innoSetup = Join-Path $tools 'innosetup.exe'
-    if (-not (Test-Path $innoSetup)) {
-        Write-Host '  下载 Inno Setup...'
-        Invoke-WebRequest 'https://jrsoftware.org/download.php/is.exe' -OutFile $innoSetup
-    }
-    Write-Host '  静默安装 Inno Setup 到 tools\inno...'
-    $p = Start-Process $innoSetup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=$innoDir" -Wait -PassThru
-    if ($p.ExitCode -ne 0) { throw "Inno Setup 安装失败(退出码 $($p.ExitCode))" }
-}
+Write-Host '==> 2/3 准备 WiX v3（便携）' -ForegroundColor Cyan
 $wixDir = Join-Path $tools 'wix'
 if (-not (Test-Path (Join-Path $wixDir 'candle.exe'))) {
     $wixZip = Join-Path $tools 'wix311.zip'
@@ -47,19 +35,27 @@ if (-not (Test-Path (Join-Path $wixDir 'candle.exe'))) {
     }
     Expand-Archive $wixZip -DestinationPath $wixDir -Force
 }
+$heat   = Join-Path $wixDir 'heat.exe'
+$candle = Join-Path $wixDir 'candle.exe'
+$light  = Join-Path $wixDir 'light.exe'
 
-Write-Host '==> 3/4 编译 setup.exe (Inno)' -ForegroundColor Cyan
-Push-Location $PSScriptRoot
-try { & $iscc 'installer.iss' } finally { Pop-Location }
-if ($LASTEXITCODE -ne 0) { throw "Inno 编译失败(退出码 $LASTEXITCODE)" }
+Write-Host '==> 3/3 编译 setup.msi + setup.exe（WiX）' -ForegroundColor Cyan
 
-Write-Host '==> 4/4 编译 setup.msi (WiX)' -ForegroundColor Cyan
-& (Join-Path $wixDir 'heat.exe') dir $stage -cg MainComponentGroup -gg -scom -sreg -srd -sui -dr INSTALLFOLDER -var var.SourceDir -out (Join-Path $PSScriptRoot 'Components.wxs')
+# 3.1 从 stage 生成文件组件清单（heat）
+& $heat dir $stage -cg MainComponentGroup -gg -scom -sreg -srd -sui -dr INSTALLFOLDER -var var.SourceDir -out (Join-Path $PSScriptRoot 'Components.wxs')
 if ($LASTEXITCODE -ne 0) { throw "heat 失败(退出码 $LASTEXITCODE)" }
-& (Join-Path $wixDir 'candle.exe') (Join-Path $PSScriptRoot 'installer.wxs') (Join-Path $PSScriptRoot 'Components.wxs') -dSourceDir="$stage"
-if ($LASTEXITCODE -ne 0) { throw "candle 失败(退出码 $LASTEXITCODE)" }
-& (Join-Path $wixDir 'light.exe') (Join-Path $PSScriptRoot 'installer.wixobj') (Join-Path $PSScriptRoot 'Components.wixobj') -out (Join-Path $release 'setup.msi')
-if ($LASTEXITCODE -ne 0) { throw "light 失败(退出码 $LASTEXITCODE)" }
+
+# 3.2 编译 MSI
+& $candle (Join-Path $PSScriptRoot 'installer.wxs') (Join-Path $PSScriptRoot 'Components.wxs') -dSourceDir="$stage"
+if ($LASTEXITCODE -ne 0) { throw "candle(msi) 失败(退出码 $LASTEXITCODE)" }
+& $light (Join-Path $PSScriptRoot 'installer.wixobj') (Join-Path $PSScriptRoot 'Components.wixobj') -out (Join-Path $release 'setup.msi')
+if ($LASTEXITCODE -ne 0) { throw "light(msi) 失败(退出码 $LASTEXITCODE)" }
+
+# 3.3 编译 EXE（Burn 引导程序，链装 setup.msi）
+& $candle (Join-Path $PSScriptRoot 'Bundle.wxs') -dMsiPath=(Join-Path $release 'setup.msi')
+if ($LASTEXITCODE -ne 0) { throw "candle(bundle) 失败(退出码 $LASTEXITCODE)" }
+& $light (Join-Path $PSScriptRoot 'Bundle.wixobj') -ext (Join-Path $wixDir 'WixBalExtension.dll') -out (Join-Path $release 'setup.exe')
+if ($LASTEXITCODE -ne 0) { throw "light(bundle) 失败(退出码 $LASTEXITCODE)" }
 
 Write-Host ''
 Write-Host '打包完成:' -ForegroundColor Green
