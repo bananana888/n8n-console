@@ -91,7 +91,7 @@ function Start-BackgroundService {
     $homeDir = $script:Config.Paths.Home
     $ps = [System.Management.Automation.PowerShell]::Create()
     [void]$ps.AddScript(". '$homeDir\lib\config.ps1'")
-    [void]$ps.AddScript("`$script:Config = Get-Config -Root '$homeDir'")
+    [void]$ps.AddScript("`$script:Config = Get-Config -Root '$homeDir' -ConfigFile '$($script:Config.ConfigFile)'")
     [void]$ps.AddScript(". '$homeDir\lib\logging.ps1'")
     [void]$ps.AddScript(". '$homeDir\lib\service.ps1'")
     [void]$ps.AddScript(". '$homeDir\lib\setup.ps1'")   # 提供 Get-NodeExecutable
@@ -126,7 +126,7 @@ function Start-SetupJob {
     $homeDir = $script:Config.Paths.Home
     $ps = [System.Management.Automation.PowerShell]::Create()
     [void]$ps.AddScript(". '$homeDir\lib\config.ps1'")
-    [void]$ps.AddScript("`$script:Config = Get-Config -Root '$homeDir'")
+    [void]$ps.AddScript("`$script:Config = Get-Config -Root '$homeDir' -ConfigFile '$($script:Config.ConfigFile)'")
     [void]$ps.AddScript(". '$homeDir\lib\logging.ps1'")
     [void]$ps.AddScript(". '$homeDir\lib\setup.ps1'")
     [void]$ps.AddScript("Invoke-Setup")
@@ -453,6 +453,15 @@ function Show-Gui {
     Add-Type -AssemblyName System.Windows.Forms | Out-Null
     Add-Type -AssemblyName System.Drawing | Out-Null
 
+    # 单实例锁：防止重复打开控制台（已有实例则提示并退出）
+    $script:appMutex = New-Object System.Threading.Mutex($false, 'n8n-console')
+    if (-not $script:appMutex.WaitOne(0)) {
+        try {
+            [System.Windows.Forms.MessageBox]::Show("控制台已有一个实例在运行，请切换到已打开的窗口。", "n8n 控制台") | Out-Null
+        } catch { }
+        return
+    }
+
     $script:StateDotColor = [System.Drawing.Color]::LightGray
 
     # 状态圆点慢闪 Timer（运行中绿→暗绿呼吸；启动中金；停止灰），约 4.8s 周期
@@ -651,4 +660,7 @@ function Show-Gui {
     $form.ShowDialog() | Out-Null
     $timer.Stop()
     $form.Dispose()
+    # 释放单实例锁
+    try { $script:appMutex.ReleaseMutex() } catch { }
+    try { $script:appMutex.Dispose() } catch { }
 }

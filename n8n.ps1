@@ -14,14 +14,17 @@
 param(
     [ValidateSet("menu", "start", "stop", "status")]
     [string]$Action = "menu",
-    [switch]$Silent
+    [switch]$Silent,
+    [string]$ConfigFile = "",
+    [switch]$Version
 )
 
 $ErrorActionPreference = "Stop"
+$script:AppVersion = '4.0.0'
 
-# ---------- 加载配置 ----------
+# ---------- 加载配置（-ConfigFile 支持多实例壳子，默认 n8n.config.psd1）----------
 . (Join-Path $PSScriptRoot "lib\config.ps1")
-$script:Config = Get-Config -Root $PSScriptRoot
+$script:Config = Get-Config -Root $PSScriptRoot -ConfigFile $ConfigFile
 
 # ---------- 点源 lib (共享同一会话作用域, 规避模块作用域坑) ----------
 . (Join-Path $PSScriptRoot "lib\logging.ps1")
@@ -45,6 +48,12 @@ function Show-YesNo([string]$msg) {
          [System.Windows.Forms.MessageBoxButtons]::YesNo,
          [System.Windows.Forms.MessageBoxIcon]::Question)
     return ($r -eq [System.Windows.Forms.DialogResult]::Yes)
+}
+
+# ---------- 版本查询 ----------
+if ($Version) {
+    Write-Output "n8n-console v$script:AppVersion (实例: $($script:Config.Instance))"
+    exit 0
 }
 
 # ---------- 入口分派 ----------

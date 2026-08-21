@@ -2,7 +2,20 @@
 logs/
 run/
 
+# Claude 工作目录
+.claude/
+
 # 通用
 *.log
 *.pid
 *.started
+*.tmp
+
+# 构建产物（打包输出）
+release/
+packaging/tools/
+packaging/Components.wxs
+packaging/*.wixobj
+
+# 便携运行时（环境自动安装产物）
+tools/

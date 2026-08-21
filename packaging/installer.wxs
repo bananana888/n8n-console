@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ============================================================
+     n8n 控制台 MSI 安装脚本（WiX Toolset v3）
+     文件组件由 build.ps1 用 heat.exe 从 tools\stage 自动生成到 Components.wxs
+     构建: candle installer.wxs Components.wxs + light → setup.msi
+     安装位置: %LOCALAPPDATA%\n8n-console（perUser，免管理员）
+     ============================================================ -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="n8n 控制台" Language="2052" Version="4.0.0"
+           Manufacturer="bananana888" UpgradeCode="D3A7F8B2-9C4E-4E1A-8F2B-6C5D9E1A7B3C">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perUser" Manufacturer="bananana888" />
+    <MajorUpgrade DowngradeErrorMessage="已安装更高版本，无法降级。" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="INSTALLFOLDER" Name="n8n-console" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
+    </Directory>
+
+    <!-- 桌面快捷方式（指向 powershell 运行垫片） -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="DesktopShortcut" Guid="D3A7F8B2-9C4E-4E1A-8F2B-6C5D9E1A7B3D">
+        <Shortcut Id="DesktopShortcutN8n" Directory="DesktopFolder" Name="n8n 控制台"
+                  Target="[SystemFolder]WindowsPowerShell\v1.0\powershell.exe"
+                  Arguments="-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File &quot;[INSTALLFOLDER]n8n-control.ps1&quot;"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="DesktopShortcutRemove" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\n8n-console" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Main" Title="n8n 控制台" Level="1">
+      <ComponentGroupRef Id="MainComponentGroup" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+  </Product>
+</Wix>
