@@ -157,33 +157,43 @@ function Install-NodePortable {
     return (Test-Path $nodeExe)
 }
 
-# 带进度的文件下载（WebClient 事件 + 节流写进度文件；
-# 事件 handler 用 $script: 变量避免 PS5.1 闭包捕获参数失效）
+# 带进度的文件下载（HttpWebRequest 手动流式读取，循环内算进度写进度文件。
+# 不用 WebClient.DownloadFile：其进度事件只在异步方法触发，同步调用无进度）
 function Download-File {
     param([string]$url, [string]$outFile, [int]$stepIndex, [int]$stepTotal)
-    $script:_dlStep = $stepIndex
-    $script:_dlTotal = $stepTotal
     $script:_lastPct = -1
-    $wc = $null
+    $resp = $null; $in = $null; $out = $null
     try {
-        $wc = New-Object System.Net.WebClient
-        $wc.DownloadProgressChanged = {
-            param($sender, $e)
-            $pct = $e.ProgressPercentage
-            if ($pct -ge ($script:_lastPct + 2) -or $pct -le 0) {
-                $script:_lastPct = $pct
-                $mb = if ($e.TotalBytesToReceive -gt 0) { " / $([math]::Round($e.TotalBytesToReceive/1MB,1)) MB" } else { "" }
-                $msg = "$pct% ($([math]::Round($e.BytesReceived/1MB,1)) MB$mb)"
-                Write-SetupProgress @{ running=$true; step=$script:_dlStep; stepCount=$script:_dlTotal; stepName='下载 node'; percent=$pct; message=$msg; mode='bar' }
+        # PS5.1 默认 TLS 可能不含 1.2，显式启用（npmmirror https 需要）
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $req = [System.Net.HttpWebRequest]::Create($url)
+        $req.Timeout = 60000
+        $resp = $req.GetResponse()
+        $total = [long]$resp.ContentLength
+        $in = $resp.GetResponseStream()
+        $out = [System.IO.File]::Create($outFile)
+        $buf = New-Object byte[] 81920
+        $downloaded = [long]0
+        while (($read = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+            $out.Write($buf, 0, $read)
+            $downloaded += $read
+            if ($total -gt 0) {
+                $pct = [int]($downloaded * 100 / $total)
+                if ($pct -ge ($script:_lastPct + 2) -or $pct -le 0) {
+                    $script:_lastPct = $pct
+                    $msg = "$pct% ($([math]::Round($downloaded/1MB,1)) / $([math]::Round($total/1MB,1)) MB)"
+                    Write-SetupProgress @{ running=$true; step=$stepIndex; stepCount=$stepTotal; stepName='下载 node'; percent=$pct; message=$msg; mode='bar' }
+                }
             }
         }
-        $wc.DownloadFile($url, $outFile)
         return $true
     } catch {
         Write-CtrlLog "下载失败: $($_.Exception.Message)"
         return $false
     } finally {
-        if ($wc) { $wc.Dispose() }
+        try { if ($in) { $in.Dispose() } } catch { }
+        try { if ($out) { $out.Dispose() } } catch { }
+        try { if ($resp) { $resp.Dispose() } } catch { }
     }
 }
 
