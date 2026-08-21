@@ -19,3 +19,7 @@ packaging/*.wixobj
 
 # 便携运行时（环境自动安装产物）
 tools/
+
+# WiX 编译中间产物
+*.wixobj
+*.wixpdb
