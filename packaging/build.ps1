@@ -58,7 +58,7 @@ if ($LASTEXITCODE -ne 0) { throw "heat 失败(退出码 $LASTEXITCODE)" }
 #      -sice 抑制 per-user 安装的 ICE 建议性检查 ICE38/ICE64/ICE91）
 & $candle (Join-Path $PSScriptRoot 'installer.wxs') (Join-Path $PSScriptRoot 'Components.wxs') -dSourceDir="$stage" -out "$PSScriptRoot/"
 if ($LASTEXITCODE -ne 0) { throw "candle(msi) 失败(退出码 $LASTEXITCODE)" }
-& $light (Join-Path $PSScriptRoot 'installer.wixobj') (Join-Path $PSScriptRoot 'Components.wixobj') -ext (Join-Path $wixDir 'WixUIExtension.dll') -sice:ICE38 -sice:ICE64 -sice:ICE91 -out (Join-Path $release 'setup.msi')
+& $light (Join-Path $PSScriptRoot 'installer.wixobj') (Join-Path $PSScriptRoot 'Components.wixobj') -ext (Join-Path $wixDir 'WixUIExtension.dll') -cultures:zh-CN -sice:ICE38 -sice:ICE64 -sice:ICE91 -out (Join-Path $release 'setup.msi')
 if ($LASTEXITCODE -ne 0) { throw "light(msi) 失败(退出码 $LASTEXITCODE)" }
 
 # 3.3 编译 EXE（Burn 引导程序，链装 setup.msi）
