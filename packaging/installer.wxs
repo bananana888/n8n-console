@@ -23,8 +23,7 @@
     <DirectoryRef Id="INSTALLFOLDER">
       <Component Id="DesktopShortcut" Guid="D3A7F8B2-9C4E-4E1A-8F2B-6C5D9E1A7B3D">
         <Shortcut Id="DesktopShortcutN8n" Directory="DesktopFolder" Name="n8n 控制台"
-                  Target="[SystemFolder]WindowsPowerShell\v1.0\powershell.exe"
-                  Arguments="-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File &quot;[INSTALLFOLDER]n8n-control.ps1&quot;"
+                  Target="[INSTALLFOLDER]n8n-console.exe"
                   WorkingDirectory="INSTALLFOLDER" />
         <RemoveFolder Id="DesktopShortcutRemove" On="uninstall" />
         <RegistryValue Root="HKCU" Key="Software\n8n-console" Name="installed" Type="integer" Value="1" KeyPath="yes" />

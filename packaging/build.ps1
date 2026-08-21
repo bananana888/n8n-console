@@ -16,11 +16,20 @@ $tools = Join-Path $PSScriptRoot 'tools'
 $release = Join-Path $Root 'release'
 New-Item -ItemType Directory -Path $tools, $release -Force | Out-Null
 
+Write-Host '==> 0/3 编译启动器 n8n-console.exe' -ForegroundColor Cyan
+$csc = Join-Path $env:windir 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+if (-not (Test-Path $csc)) { $csc = Join-Path $env:windir 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
+if (-not (Test-Path $csc)) { throw '未找到 csc.exe（需要 .NET Framework）' }
+$smaDll = Join-Path $env:windir 'Microsoft.NET\assembly\GAC_MSIL\System.Management.Automation\v4.0_3.0.0.0__31bf3856ad364e35\System.Management.Automation.dll'
+if (-not (Test-Path $smaDll)) { throw '未找到 System.Management.Automation.dll' }
+& $csc -nologo -target:winexe -out:"$Root\n8n-console.exe" -r:"$smaDll" (Join-Path $PSScriptRoot 'n8n-console.cs')
+if ($LASTEXITCODE -ne 0) { throw "csc 编译失败(退出码 $LASTEXITCODE)" }
+
 Write-Host '==> 1/3 收集待打包文件到 tools\stage' -ForegroundColor Cyan
 $stage = Join-Path $tools 'stage'
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
-$files = @('n8n.ps1', 'n8n-control.ps1', 'n8n.config.psd1', 'example.config.psd1', 'LICENSE', 'README.md', 'CHANGELOG.md')
+$files = @('n8n.ps1', 'n8n-control.ps1', 'n8n.config.psd1', 'example.config.psd1', 'n8n-console.exe', 'LICENSE', 'README.md', 'CHANGELOG.md')
 foreach ($f in $files) { Copy-Item (Join-Path $Root $f) $stage -Force }
 Copy-Item (Join-Path $Root 'lib') $stage -Recurse -Force
 Copy-Item (Join-Path $Root 'assets') $stage -Recurse -Force
