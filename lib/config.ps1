@@ -29,9 +29,13 @@ function Merge-Deep {
 }
 
 function Get-Config {
-    param([string]$Root)
+    param(
+        [string]$Root,
+        [string]$ConfigFile = 'n8n.config.psd1'
+    )
 
     if ([string]::IsNullOrWhiteSpace($Root)) { $Root = $PSScriptRoot }
+    if ([string]::IsNullOrWhiteSpace($ConfigFile)) { $ConfigFile = 'n8n.config.psd1' }
 
     # 内置默认配置（键缺失时兜底；配置文件的键会覆盖默认值）
     $defaults = @{
@@ -58,8 +62,8 @@ function Get-Config {
         Logs = @{
             Control = 'control.log'
             Fatal   = 'error.log'
-            Stdout  = 'n8n.log'
-            Stderr  = 'n8n-error.log'
+            Stdout  = 'stdout.log'
+            Stderr  = 'stderr.log'
         }
         # 环境自检 + 自动安装（每服务一个 Setup 段；Enabled=$false 时跳过检测）
         Setup = @{
@@ -72,8 +76,8 @@ function Get-Config {
         }
     }
 
-    # 加载用户配置文件
-    $cfgFile = Join-Path $Root 'n8n.config.psd1'
+    # 加载用户配置文件（-ConfigFile 指定，支持多实例壳子）
+    $cfgFile = Join-Path $Root $ConfigFile
     $user = @{}
     if (Test-Path $cfgFile) {
         try {
@@ -83,8 +87,10 @@ function Get-Config {
         }
     }
     $cfg = Merge-Deep $defaults $user
-    # 实例名 = 配置文件名去掉扩展名（如 n8n.config.psd1 -> n8n），用于运行时文件/进度文件区分
-    $cfg.Instance = [IO.Path]::GetFileNameWithoutExtension([IO.Path]::GetFileNameWithoutExtension($cfgFile))
+    $cfg.ConfigFile = $ConfigFile
+    # 实例名 = 配置文件名去掉扩展名（如 n8n.config.psd1 -> n8n），
+    # 用于运行时文件（pid/started/setup进度）区分，多实例互不干扰
+    $cfg.Instance = [IO.Path]::GetFileNameWithoutExtension([IO.Path]::GetFileNameWithoutExtension($ConfigFile))
 
     # 解析绝对路径（注意: 不用 $home 作变量名，它是 PowerShell 只读自动变量）
     $homeDir = $cfg.Console.Home
@@ -113,8 +119,8 @@ function Get-Config {
         FatalLog   = [IO.Path]::Combine($logDir, $cfg.Logs.Fatal)
         StdoutLog  = [IO.Path]::Combine($logDir, $cfg.Logs.Stdout)
         StderrLog  = [IO.Path]::Combine($logDir, $cfg.Logs.Stderr)
-        PidFile    = [IO.Path]::Combine($runDir, 'n8n.pid')
-        StampFile  = [IO.Path]::Combine($runDir, 'n8n.started')
+        PidFile    = [IO.Path]::Combine($runDir, "$($cfg.Instance).pid")
+        StampFile  = [IO.Path]::Combine($runDir, "$($cfg.Instance).started")
     }
 
     # N8N_LOG_FILE 未显式配置时，从 Logs.Stdout 推导绝对路径
@@ -127,6 +133,17 @@ function Get-Config {
         $toolsDir = $cfg.Setup.ToolsDir
         if (-not [IO.Path]::IsPathRooted($toolsDir)) { $toolsDir = Join-Path $homeDir $toolsDir }
         $cfg.Setup.ToolsDir = $toolsDir
+    }
+
+    # 配置校验：关键字段缺失时告警（不阻断，靠默认值/运行时兜底）
+    if ([string]::IsNullOrWhiteSpace($cfg.Service.Executable)) {
+        Write-Host "警告: Service.Executable 未配置，服务将无法启动" -ForegroundColor Yellow
+    }
+    if (-not $cfg.Service.Arguments -or $cfg.Service.Arguments.Count -eq 0) {
+        Write-Host "警告: Service.Arguments 未配置（将只启动可执行文件，不带参数）" -ForegroundColor Yellow
+    }
+    if ([string]::IsNullOrWhiteSpace($cfg.Service.WorkingDir)) {
+        Write-Host "警告: Service.WorkingDir 未配置（默认使用控制台根目录）" -ForegroundColor Yellow
     }
 
     return $cfg
