@@ -23,3 +23,6 @@ tools/
 # WiX 编译中间产物
 *.wixobj
 *.wixpdb
+
+# 编译启动器（本地生成）
+n8n-console.exe
