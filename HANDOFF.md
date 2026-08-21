@@ -14,6 +14,7 @@
 - 运行状态实时刷新（PID / 端口 / 运行时长）
 - 系统托盘常驻（关闭窗口最小化到托盘，右键菜单操作）
 - 完整日志体系（n8n 运行日志 / 操作审计 / 错误兜底）
+- **v4.0.0 增强**：多实例壳子（`-ConfigFile` 复用管任意命令行服务）、环境缺失自动安装（窗口内进度条）、一键打包 `setup.exe`/`setup.msi`（装用户目录+快捷方式）、日志轮转、单实例锁；作为开源项目发布（MIT），并提供 `shell-ui` skill 复用整套壳子
 
 **两个独立目录：**
 | 目录 | 内容 | 职责 |
@@ -51,18 +52,23 @@ D:\APP\
 │   ├── start.bat                   命令行启动备份入口（备选）
 │   └── scripts\                    （空目录，已迁移至控制台）
 │
-└── n8n-console\                    ← 控制台（运维入口）
-    ├── n8n.ps1                     主入口（-Action menu/start/stop/status + -Silent）
-    ├── n8n-control.ps1             兼容垫片 → 一行转发 n8n.ps1（桌面快捷方式指向它）
-    ├── n8n.config.psd1             ★ 全部配置外置（路径/端口/healthz/注入 env/日志，含注释）
+└── n8n-console\                    ← 控制台（运维入口，也是开源仓库）
+    ├── n8n.ps1                     主入口（-Action menu/start/stop/status + -Silent + -ConfigFile 多实例）
+    ├── n8n-control.ps1             兼容垫片 → 一行转发 n8n.ps1
+    ├── n8n-console.exe             编译启动器（C#，进程名 n8n-console，桌面快捷方式指向它）
+    ├── n8n.config.psd1             ★ 全部配置外置（路径/端口/healthz/注入 env/日志/Setup 段）
+    ├── example.config.psd1         通用配置模板（复用壳子管其它服务时复制改）
     ├── lib\
     │   ├── config.ps1              配置加载 + 默认值合并 + 路径解析（Get-Config -Root 必传）
-    │   ├── logging.ps1             日志函数（control.log 审计 / error.log 兜底）
+    │   ├── logging.ps1             日志函数（轮转，>2MB 滚动保留 3 份）
     │   ├── service.ps1             纯进程控制（无 UI，返回结构化结果）
-    │   └── gui.ps1                 WinForms UI（状态卡片/hover/托盘/1s 刷新）
+    │   ├── setup.ps1               环境检测 + 自动安装（进度写 run\<实例>.setup.json）
+    │   └── gui.ps1                 WinForms UI（状态卡片/绿灯慢闪/toast/异步启动/安装进度面板）
+    ├── packaging\                  打包脚本（build.ps1 编译 setup.exe+setup.msi；installer.wxs/iss/Bundle.wxs；n8n-console.cs 启动器源码）
     ├── create_shortcut.py          重建桌面快捷方式（Python + pylnk3）
     ├── launcher.vbs                vbs 无窗口启动器（备用，默认未使用）
-    ├── assets\n8n.ico              图标（快捷方式 + 托盘）
+    ├── assets\n8n.ico              图标（快捷方式 + 安装包）
+    ├── release\                    打包产物（setup.msi / n8n-console-setup.exe，gitignore 排除）
     ├── logs\
     │   ├── n8n.log                 n8n 运行输出（N8N_LOG_FILE）
     │   ├── control.log             操作审计（何时启动/停止/结果）
@@ -111,7 +117,10 @@ powershell -ExecutionPolicy Bypass -File D:\APP\n8n-console\n8n.ps1 -Action stat
   - **停止**：读 `run\n8n.pid` → `taskkill /T /F`（进程树）→ 等待端口释放 → 清空 PID/时间戳文件
   - **状态**：PID 文件里的**无效 PID 自愈清理**（进程已死/名不符即清空，不再残留误导）
 - **`lib/gui.ps1`**：WinForms 状态卡片（GDI 画圆点，运行中**绿灯慢闪**）+ 三个 hover 动画按钮（Timer 颜色插值）+ 1 秒定时刷新；**启动异步化**（独立 runspace 执行 Start-ManagedService，UI 不冻结）+ **无托盘**（关窗直接退出，n8n 后台进程不受影响）；只调用 service 函数并转提示框，不内联进程逻辑
-- **`n8n-control.ps1`**：兼容垫片，一行转发 `n8n.ps1`（桌面快捷方式仍指向它，无需重建 .lnk）
+- **`n8n-control.ps1`**：兼容垫片，一行转发 `n8n.ps1`
+- **`lib/setup.ps1`**：环境自检 + 自动安装（`Test-SetupNeeded`/`Invoke-Setup`）。点启动检测 `Setup` 段步骤缺失 → 弹确认 → 后台安装（便携 node 到 `tools\` + npm install + 数据初始化）→ 进度写 `run\<实例>.setup.json` → GUI 轮询进度条。**每步 `InstallTimeoutSec`（默认 600s）超时直接报错不卡死**。便携 node 优先（`Get-NodeExecutable`）。
+- **`n8n-console.exe`（C# 启动器）**：`packaging/n8n-console.cs` 编译，内嵌 PowerShell 引擎运行控制台（`ExecutionPolicy=Bypass`）。进程名显示 `n8n-console` 而非 powershell，窗口标题用 `Service.Name`。桌面快捷方式与安装包都指向它。用系统 `csc.exe`（.NET Framework 自带，无需 SDK）编译，`/win32icon` 嵌图标。
+- **打包**（`packaging/build.ps1`）：只依赖 WiX v3（zip 便携，首次联网下载）。编译 `n8n-console.exe` → heat/candle/light 生成 `release/setup.msi` + `n8n-console-setup.exe`（Burn 引导）。MSI 装用户目录（`WixUI_InstallDir` 可选目录）+ 桌面快捷方式 + 开始菜单卸载。**注意 msi 编译须 `-cultures:zh-CN`**（WixUI 中文编码）+ `-sice:ICE38;64;91`（per-user 建议性检查）。
 - **注意**：所有含中文文件为 **UTF-8 BOM** 编码（PS 5.1 中文显示必需，改文件后务必保留 BOM；`head -c3 | xxd -p` 应为 `efbbbf`）
 
 ### create_shortcut.py
@@ -152,9 +161,9 @@ powershell -ExecutionPolicy Bypass -File D:\APP\n8n-console\n8n.ps1 -Action stat
 - **影响**：Code 节点（JS）退回 n8n 1.x 模式在主进程执行（功能可用但隔离性降低）；**Python Code 节点不可用**（2.35.4 下 JS runner 仍会注册，无害）
 - 若需恢复 task runner：安装 Python 3 后，去掉 `n8n.config.psd1` 里的 `N8N_RUNNERS_ENABLED=false`（保留 `N8N_PYTHON_ENABLED=false`）
 
-### 7.2 启动时命令行窗口一闪
-- 公司卡巴斯基拦截 vbs→powershell 方案，只能走 powershell.exe 直接启动；Windows console subsystem 进程启动时必然瞬时创建 conhost（一闪），无法在现有约束下消除
-- 彻底解决需：IT 给 launcher.vbs 加白名单，或编译 C# GUI 启动器（需 .NET SDK）
+### 7.2 启动时命令行窗口一闪（已解决）
+- **已解决**：改用编译的 `n8n-console.exe`（C# winexe，非 console subsystem）启动，无 conhost 一闪。用系统 `csc.exe` 编译（.NET Framework 自带，无需 SDK）。
+- vbs→powershell 方案仍被卡巴斯基拦截，保留备用。
 
 ### 7.3 控制台与 n8n 分离
 - 控制台文件全在 `D:\APP\n8n-console`；n8n 本体在 `D:\APP\n8n`
@@ -177,6 +186,12 @@ node node_modules/n8n/bin/n8n --version   # 确认版本
 python D:\APP\n8n-console\create_shortcut.py
 ```
 （需要 Python 3 + pylnk3；如环境缺失：`pip install pylnk3`）
+
+### 打包安装包
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\APP\n8n-console\packaging\build.ps1
+```
+（首次需联网下载 WiX v3 ~30MB 到 `packaging\tools\`；输出 `release\setup.msi` + `release\n8n-console-setup.exe`）
 
 ### 修改配置
 - 端口/健康检查地址/node 路径/注入 env：改 **`n8n.config.psd1`**（`Service` 段）
@@ -206,12 +221,18 @@ python D:\APP\n8n-console\create_shortcut.py
 | 2026-08-21 | 修复**永久黄灯**：异步 job 完成判定误用 `PowerShell.HasCompleted`（该属性不存在返回 $null），改用 `IAsyncResult.IsCompleted` + 90s 超时兜底 |
 | 2026-08-21 | 启动/停止结果改为**内联 toast**（复用底部提示行，4s 自动恢复，成功绿/失败红），不再弹 MessageBox；仅"详情"保留弹窗 |
 | 2026-08-21 | **环境自检 + 自动安装**（工具箱能力）：点启动检测 node/n8n 缺失 → 弹确认 → 后台自动装（便携 node 到 tools\ + npm install n8n + 数据初始化）→ 窗口内进度条实时展示 → 装完自动继续启动。配置在 `n8n.config.psd1` 的 `Setup` 段（通用，每服务一份） |
+| 2026-08-21 | **v4.0.0 复用性**：`-ConfigFile` 多实例壳子（运行文件按实例隔离）、`example.config.psd1` 模板、日志轮转、配置校验、GUI 单实例锁、`-Version` |
+| 2026-08-21 | **打包发布**：`packaging/build.ps1` 生成 `release\setup.msi` + `n8n-console-setup.exe`（WiX v3 + Burn）；README/LICENSE(MIT)/CHANGELOG/.gitignore；推 GitHub `bananana888/n8n-`，tag `v4.0.0` |
+| 2026-08-21 | **C# 启动器**：`n8n-console.exe`（csc 编译 + /win32icon 图标），进程名 n8n-console 而非 powershell，窗口标题=服务名 |
+| 2026-08-21 | **安装包 5 修复**：exe 嵌图标、MSI 目录选择 UI（WixUI_InstallDir + -cultures:zh-CN）、安装中黄灯、开始菜单卸载、Setup 安装超时（InstallTimeoutSec） |
+| 2026-08-21 | **`shell-ui` skill**（`~/.claude/skills/shell-ui/`）：整套壳子沉淀为 skill，为任意命令行服务套 UI 壳子（复制 templates + 适配配置） |
 
 ---
 
 ## 10. 联系方式 / 备注
 
-- 控制台入口：`D:\APP\n8n-console\n8n.ps1`（桌面快捷方式经 `n8n-control.ps1` 垫片转发）
+- 控制台入口：`D:\APP\n8n-console\n8n-console.exe`（编译启动器，桌面快捷方式指向它）；脚本入口 `n8n.ps1`
 - **唯一需要常改的运维文件：`D:\APP\n8n-console\n8n.config.psd1`**
+- **复用壳子**：`~/.claude/skills/shell-ui/`（skill）——为任意命令行服务套 UI 壳子，Claude 说"给 X 套个壳"自动加载
 - 遇到 JIT 调试弹窗/异常：**不要关闭**，把"异常文本"整段复制发维护者
 - 本机安全软件：卡巴斯基 Endpoint Security（影响 vbs 启动方案，见 7.2）
