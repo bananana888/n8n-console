@@ -7,7 +7,7 @@
      ============================================================ -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*" Name="n8n 控制台" Language="2052" Version="4.0.0"
-           Manufacturer="bananana888" UpgradeCode="D3A7F8B2-9C4E-4E1A-8F2B-6C5D9E1A7B3C">
+           Manufacturer="bananana888" UpgradeCode="D3A7F8B2-9C4E-4E1A-8F2B-6C5D9E1A7B3C" Codepage="65001">
     <Package InstallerVersion="200" Compressed="yes" InstallScope="perUser" Manufacturer="bananana888" />
     <MajorUpgrade DowngradeErrorMessage="已安装更高版本，无法降级。" />
     <MediaTemplate EmbedCab="yes" />
