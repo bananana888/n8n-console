@@ -22,6 +22,11 @@
 | `D:\APP\n8n` | n8n 本体（node_modules、数据 .n8n） | 应用本体，一般不动 |
 | `D:\APP\n8n-console` | 控制台全部文件（脚本/日志/图标） | 运维入口，日常操作都在这 |
 
+> **⚠️ 环境迁移说明（2026-08-22）**：本文档基于**公司机**编写，以下旧路径均已失效，请以家用机为准：
+> - 公司机：控制台 `D:\APP\n8n-console`、n8n **本地安装**于 `D:\APP\n8n`、用户 `C:\Users\SCY004730`
+> - **家用机（当前环境）**：控制台 `E:\ProgramFiles\n8n-console`、n8n **全局安装**于 `D:\npm-global\node_modules\n8n`（v2.35.7）、node `C:\Users\Allen\.workbuddy\binaries\node\versions\22.22.2\node.exe`、数据目录默认 `C:\Users\Allen\.n8n`（**未设 N8N_USER_FOLDER**，公司机的双嵌套 `.n8n\.n8n` 已不存在）
+> - 脚本已做兼容（换机器不用改代码）：`Console.Home` 留空自动用脚本所在目录；node 绝对路径失效会回退 PATH；n8n 入口失效会自动探测（本地 node_modules / npm root -g / PATH）。
+
 ---
 
 ## 2. 环境信息

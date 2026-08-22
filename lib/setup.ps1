@@ -23,14 +23,79 @@ function Write-SetupProgress {
 }
 
 # ---------- 便携 node 解析 ----------
-# 优先用便携 node（Setup 启用且 tools\node-<版本>\node.exe 存在），否则返回配置 Executable
+# 解析优先级: 便携 node（Setup 装到 tools\）→ 配置 Executable（绝对路径）→ PATH 中的 node。
+# 配置的绝对路径失效（换机器/目录被清理）时自动回退 PATH，不会卡死，由调用方给出明确报错。
 function Get-NodeExecutable {
     $setup = $script:Config.Setup
     if ($setup.Enabled -and -not [string]::IsNullOrWhiteSpace($setup.NodeVersion)) {
         $p = Join-Path $setup.ToolsDir "node-$($setup.NodeVersion)\node.exe"
         if (Test-Path $p) { return $p }
     }
-    return $script:Config.Service.Executable
+    $cfg = $script:Config.Service.Executable
+    if ([IO.Path]::IsPathRooted($cfg)) {
+        if (Test-Path $cfg) { return $cfg }
+    } else {
+        $cmd = Get-Command $cfg -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source) { return $cmd.Source }
+    }
+    $fallback = Get-Command 'node' -ErrorAction SilentlyContinue
+    if ($fallback -and $fallback.Source) { return $fallback.Source }
+    return $cfg   # 全部失效时原样返回，由 service.ps1 的定位逻辑给出明确报错
+}
+
+# ---------- n8n 入口自动探测 ----------
+# n8n 启动脚本随安装方式/机器迁移而变化（本地安装 D:\APP\n8n\node_modules\n8n\bin\n8n、
+# 全局安装 D:\npm-global\node_modules\n8n\bin\n8n 等）。按顺序探测真实入口：
+#   ① 配置 Service.Arguments[0]（绝对路径存在即用）
+#   ② {WorkingDir}\node_modules\n8n\bin\n8n（npm 本地安装）
+#   ③ npm root -g 定位全局 node_modules → n8n\bin\n8n（npm 全局安装）
+#   ④ PATH 中 n8n.cmd shim，解析其内部指向的真实 JS 入口
+# 找不到返回空串，由调用方（service.ps1）报错提示配置。
+function Get-N8nEntrypoint {
+    $srv = $script:Config.Service
+    $cands = New-Object System.Collections.ArrayList
+
+    # ① 配置的入口（绝对路径）
+    if ($srv.Arguments.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($srv.Arguments[0])) {
+        [void]$cands.Add([string]$srv.Arguments[0])
+    }
+    # ② 本地安装（工作目录下 node_modules）
+    if (-not [string]::IsNullOrWhiteSpace($srv.WorkingDir)) {
+        [void]$cands.Add((Join-Path $srv.WorkingDir 'node_modules\n8n\bin\n8n'))
+    }
+    # ③ 全局安装（npm root -g）
+    $npmRoot = ''
+    $npmCmd = Get-Command 'npm' -ErrorAction SilentlyContinue
+    if ($npmCmd -and $npmCmd.Source) {
+        try { $npmRoot = (& $npmCmd.Source root -g 2>$null | Out-String).Trim() } catch { }
+    }
+    if (-not $npmRoot) {
+        # npm 不在 PATH：用便携 node 同目录的 npm.cmd（Setup 自动安装场景）
+        $nodeExe = Get-NodeExecutable
+        $npmPath = Join-Path (Split-Path $nodeExe -Parent) 'npm.cmd'
+        if (Test-Path $npmPath) {
+            try { $npmRoot = (& $npmPath root -g 2>$null | Out-String).Trim() } catch { }
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($npmRoot)) {
+        [void]$cands.Add((Join-Path $npmRoot 'n8n\bin\n8n'))
+    }
+    # ④ PATH 中 n8n.cmd shim，解析其内部 %~dp0\...\n8n\bin\n8n 真实 JS 入口
+    $shim = Get-Command 'n8n.cmd' -ErrorAction SilentlyContinue
+    if ($shim -and $shim.Source -and (Test-Path $shim.Source)) {
+        try {
+            $content = Get-Content $shim.Source -Raw -ErrorAction Stop
+            if ($content -match '%~dp0([\\/][^"`\r\n]*n8n[\\/]bin[\\/]n8n[^"`\r\n]*)') {
+                $dp0 = Split-Path $shim.Source -Parent
+                [void]$cands.Add((Join-Path $dp0 $matches[1]))
+            }
+        } catch { }
+    }
+
+    foreach ($c in $cands) {
+        if (-not [string]::IsNullOrWhiteSpace($c) -and (Test-Path $c)) { return $c }
+    }
+    return ''
 }
 
 # node 是否可用且版本满足（>= 22.22，n8n 2.35.4 要求）

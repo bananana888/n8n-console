@@ -30,7 +30,7 @@ A lightweight Windows desktop console (PowerShell + WinForms) that starts/stops 
 | **■ 停止** | 确认后停止（含子进程） |
 | **ⓘ 详情** | 查看 PID / 端口 / 日志路径 |
 
-命令行备选：
+命令行备选（在仓库根目录下执行，路径按实际存放位置）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File n8n.ps1 -Action start -Silent   # 静默启动

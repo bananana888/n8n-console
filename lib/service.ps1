@@ -70,7 +70,10 @@ function Get-LogTail {
 # 若目标文件被占用/杀软锁定会报 EPERM 直接退出。启动前清掉，解压到空目录避免覆盖。
 function Clear-FrontendCache {
     $userFolder = $script:Config.Service.Env['N8N_USER_FOLDER']
-    if ([string]::IsNullOrWhiteSpace($userFolder)) { return }
+    if ([string]::IsNullOrWhiteSpace($userFolder)) {
+        # 未显式配置 N8N_USER_FOLDER 时，n8n 数据默认在 %USERPROFILE%\.n8n（家用机场景）
+        $userFolder = Join-Path $env:USERPROFILE '.n8n'
+    }
     $cachePublic = Join-Path $userFolder '.cache\n8n\public'
     if (-not (Test-Path $cachePublic)) { return }
 
@@ -126,17 +129,11 @@ function Start-ManagedService {
         return @{ Ok = $false; Message = $msg; PID = 0 }
     }
 
-    # 定位可执行文件：便携 node 优先（Setup 自动装到 tools\ 的，优先于配置/系统 PATH），
-    # 否则用配置的 Executable（绝对路径优先，PATH 兜底）
-    $cfgExe = Get-NodeExecutable
-    $exePath = $null
-    if ([IO.Path]::IsPathRooted($cfgExe) -and (Test-Path $cfgExe)) {
-        $exePath = $cfgExe
-    } else {
-        $exePath = (Get-Command $cfgExe -ErrorAction SilentlyContinue).Source
-    }
-    if (-not $exePath) {
-        $msg = "未找到命令 $($cfgExe)，请确认路径正确或已加入 PATH。"
+    # 定位可执行文件：Get-NodeExecutable 内部已做「便携 node → 配置绝对路径 → PATH 兜底」逐级回退，
+    # 配置的绝对路径失效（换机器/目录被清理）也不会卡死，会回退到 PATH 中的 node
+    $exePath = Get-NodeExecutable
+    if (-not $exePath -or -not (Test-Path $exePath)) {
+        $msg = "未找到可执行的 node。请确认 Service.Executable 路径正确，或 PATH 中有 node(>=22.22)。"
         Write-FatalLog "启动失败: $msg"
         return @{ Ok = $false; Message = $msg; PID = 0 }
     }
@@ -167,8 +164,23 @@ function Start-ManagedService {
         foreach ($k in $srv.Env.Keys) {
             Set-Item -Path "env:$k" -Value $srv.Env[$k]
         }
+        # 组装参数前：入口脚本(Arguments[0])若已失效，自动探测替换。
+        # 换机器/换安装方式后（本地安装 → 全局安装）n8n bin 路径会迁移，探测到即替换并写日志。
+        $cmdArgs = @($srv.Arguments)
+        if ($cmdArgs.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($cmdArgs[0])) {
+            $entry = $cmdArgs[0]
+            $entryOk = ([IO.Path]::IsPathRooted($entry) -and (Test-Path $entry)) -or
+                       [bool](Get-Command $entry -ErrorAction SilentlyContinue)
+            if (-not $entryOk) {
+                $detected = Get-N8nEntrypoint
+                if ($detected) {
+                    Write-CtrlLog "入口 $entry 不存在，自动探测替换为: $detected"
+                    $cmdArgs[0] = $detected
+                }
+            }
+        }
         # 参数拼装（逐个加引号，兼容含空格路径）
-        $argString = (($srv.Arguments | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+        $argString = (($cmdArgs | ForEach-Object { '"' + $_ + '"' }) -join ' ')
 
         # 用 [System.Diagnostics.Process] 而非 Start-Process，以便传递 CREATE_NO_WINDOW
         $proc = New-Object System.Diagnostics.Process

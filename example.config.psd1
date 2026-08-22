@@ -10,8 +10,8 @@
 
 @{
     Console = @{
-        # 控制台根目录（一般不改；留空用脚本所在目录）
-        Home   = 'D:\APP\n8n-console'
+        # 控制台根目录（一般不改；留空用脚本所在目录，换目录/换机器拷贝即用）
+        Home   = ''
         LogDir = 'logs'
         RunDir = 'run'
         Icon   = 'assets\n8n.ico'        # 可换成你自己的 .ico

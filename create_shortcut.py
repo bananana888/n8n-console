@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-"""创建桌面快捷方式「n8n 控制台.lnk」——直接启动 powershell.exe
+"""创建桌面快捷方式「n8n 控制台.lnk」——直接启动 n8n-console.exe
 
-注意: 公司电脑卡巴斯基拦截 vbs→powershell 路径 (LOLBin 防护), 因此直接用 powershell.exe
-      作为快捷方式目标。Windows console subsystem 进程会瞬时显示 conhost 窗口 (一闪),
-      这是固有限制, 需 IT 在卡巴斯基给 launcher.vbs 加白名单后才能彻底无闪。
+n8n-console.exe 是 C# 编译的 winexe 启动器（无 console 子系统，双击无 conhost
+黑框一闪），内部经 PowerShell 拉起 n8n.ps1 主入口。桌面/安装包的快捷方式均指向它。
 """
 import os
 import sys
@@ -26,17 +25,18 @@ def main():
     desktop = get_desktop_path()
     lnk_path = os.path.join(desktop, "n8n 控制台.lnk")
 
-    powershell = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-    args = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "D:\\APP\\n8n-console\\n8n-control.ps1"'
+    # 控制台根目录 = 脚本所在目录（换机器/换目录拷贝即用，无需改路径）
+    root = os.path.dirname(os.path.abspath(__file__))
+    launcher = os.path.join(root, "n8n-console.exe")
+    icon = os.path.join(root, "assets", "n8n.ico")
 
     pylnk3.for_file(
-        target_file=powershell,
+        target_file=launcher,
         lnk_name=lnk_path,
-        arguments=args,
-        description="n8n 工作流平台控制台 - 启动/停止/状态 (常驻托盘)",
-        icon_file=r"D:\APP\n8n-console\assets\n8n.ico",
+        description="n8n 工作流平台控制台 - 启动/停止/状态",
+        icon_file=icon,
         icon_index=0,
-        work_dir=r"D:\APP\n8n-console",
+        work_dir=root,
     )
 
     print(f"已重建快捷方式: {lnk_path}")
