@@ -164,19 +164,27 @@ function Start-ManagedService {
         foreach ($k in $srv.Env.Keys) {
             Set-Item -Path "env:$k" -Value $srv.Env[$k]
         }
-        # 组装参数前：入口脚本(Arguments[0])若已失效，自动探测替换。
-        # 换机器/换安装方式后（本地安装 → 全局安装）n8n bin 路径会迁移，探测到即替换并写日志。
+        # 组装参数前：入口脚本(Arguments[0])若失效或未配置，自动探测替换。
+        # 换机器/换安装方式后（自包含/本地/全局）n8n bin 路径会迁移，探测到即替换并写日志。
         $cmdArgs = @($srv.Arguments)
+        $needDetect = $false
         if ($cmdArgs.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($cmdArgs[0])) {
             $entry = $cmdArgs[0]
             $entryOk = ([IO.Path]::IsPathRooted($entry) -and (Test-Path $entry)) -or
                        [bool](Get-Command $entry -ErrorAction SilentlyContinue)
-            if (-not $entryOk) {
-                $detected = Get-N8nEntrypoint
-                if ($detected) {
-                    Write-CtrlLog "入口 $entry 不存在，自动探测替换为: $detected"
-                    $cmdArgs[0] = $detected
-                }
+            if (-not $entryOk) { $needDetect = $true }
+        } elseif ($cmdArgs.Count -eq 0) {
+            # 未配置入口（通用壳子默认）：探测 n8n 真实入口
+            $needDetect = $true
+        }
+        if ($needDetect) {
+            $detected = Get-N8nEntrypoint
+            if ($detected) {
+                Write-CtrlLog "自动探测服务入口: $detected"
+                # 保留原尾随参数（如 'start'）；无尾随参数时按 n8n 语义补默认子命令
+                $tail = @($cmdArgs | Select-Object -Skip 1)
+                if ($tail.Count -eq 0) { $tail = @('start') }
+                $cmdArgs = @($detected) + $tail
             }
         }
         # 参数拼装（逐个加引号，兼容含空格路径）

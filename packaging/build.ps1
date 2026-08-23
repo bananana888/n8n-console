@@ -55,19 +55,21 @@ Write-Host '==> 3/3 编译 setup.msi + n8n-console-setup.exe（WiX）' -Foregrou
 if ($LASTEXITCODE -ne 0) { throw "heat 失败(退出码 $LASTEXITCODE)" }
 
 # 3.2 编译 MSI（-out 让 wixobj 输出到 packaging\，与后续 light 对齐；
-#      -sice 抑制 per-user 安装的 ICE 建议性检查 ICE38/ICE64/ICE91）
-& $candle (Join-Path $PSScriptRoot 'installer.wxs') (Join-Path $PSScriptRoot 'Components.wxs') -dSourceDir="$stage" -out "$PSScriptRoot/"
+#      -sice 抑制 per-user 安装的 ICE 建议性检查 ICE38/ICE64/ICE91；
+#      -dLicenseRtf 供 WixUILicenseRtf 变量，让 MSI 许可页显示正式 MIT）
+& $candle (Join-Path $PSScriptRoot 'installer.wxs') (Join-Path $PSScriptRoot 'Components.wxs') -dSourceDir="$stage" -dLicenseRtf="$PSScriptRoot\license.rtf" -out "$PSScriptRoot/"
 if ($LASTEXITCODE -ne 0) { throw "candle(msi) 失败(退出码 $LASTEXITCODE)" }
 & $light (Join-Path $PSScriptRoot 'installer.wixobj') (Join-Path $PSScriptRoot 'Components.wixobj') -ext (Join-Path $wixDir 'WixUIExtension.dll') -cultures:zh-CN -sice:ICE38 -sice:ICE64 -sice:ICE91 -out (Join-Path $release 'setup.msi')
 if ($LASTEXITCODE -ne 0) { throw "light(msi) 失败(退出码 $LASTEXITCODE)" }
 
 # 3.3 编译 EXE（Burn 引导程序，链装 setup.msi）
+#     -ext WixBalExtension.dll：Bundle 的 bal: 命名空间（许可变量/选项页）需要此扩展，缺了会 CNDL0200/0201
 $msiPath = Join-Path $release 'setup.msi'
-& $candle (Join-Path $PSScriptRoot 'Bundle.wxs') -dMsiPath="$msiPath" -out "$PSScriptRoot/"
+& $candle (Join-Path $PSScriptRoot 'Bundle.wxs') -ext (Join-Path $wixDir 'WixBalExtension.dll') -dMsiPath="$msiPath" -dLicenseRtf="$PSScriptRoot\license.rtf" -out "$PSScriptRoot/"
 if ($LASTEXITCODE -ne 0) { throw "candle(bundle) 失败(退出码 $LASTEXITCODE)" }
 & $light (Join-Path $PSScriptRoot 'Bundle.wixobj') -ext (Join-Path $wixDir 'WixBalExtension.dll') -out (Join-Path $release 'n8n-console-setup.exe')
 if ($LASTEXITCODE -ne 0) { throw "light(bundle) 失败(退出码 $LASTEXITCODE)" }
 
 Write-Host ''
 Write-Host '打包完成:' -ForegroundColor Green
-Get-ChildItem $release -Filter 'setup.*' | ForEach-Object { Write-Host "  $($_.FullName) ($([math]::Round($_.Length / 1MB, 1)) MB)" }
+Get-ChildItem $release | Where-Object { $_.Name -match 'setup\.msi$|n8n-console-setup\.exe$' } | ForEach-Object { Write-Host "  $($_.FullName) ($([math]::Round($_.Length / 1MB, 1)) MB)" }

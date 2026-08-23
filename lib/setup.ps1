@@ -44,43 +44,55 @@ function Get-NodeExecutable {
 }
 
 # ---------- n8n 入口自动探测 ----------
-# n8n 启动脚本随安装方式/机器迁移而变化（本地安装 D:\APP\n8n\node_modules\n8n\bin\n8n、
-# 全局安装 D:\npm-global\node_modules\n8n\bin\n8n 等）。按顺序探测真实入口：
-#   ① 配置 Service.Arguments[0]（绝对路径存在即用）
-#   ② {WorkingDir}\node_modules\n8n\bin\n8n（npm 本地安装）
-#   ③ npm root -g 定位全局 node_modules → n8n\bin\n8n（npm 全局安装）
-#   ④ PATH 中 n8n.cmd shim，解析其内部指向的真实 JS 入口
+# n8n 启动脚本随安装方式/机器迁移而变化（自包含便携 tools\node-<版本>、
+# 本地安装、npm 全局安装、PATH shim 等）。按顺序探测真实入口：
+#   ① 便携 node 目录（自包含：Setup 把 n8n 装到 tools\node-<版本>\node_modules）
+#   ② 配置 Service.Arguments[0]（绝对路径存在即用）
+#   ③ {WorkingDir}\node_modules\n8n\bin\n8n（npm 本地安装）
+#   ④ npm root -g 定位全局 node_modules → n8n\bin\n8n（npm 全局安装）
+#   ⑤ PATH 中 n8n.cmd shim，解析其内部指向的真实 JS 入口
 # 找不到返回空串，由调用方（service.ps1）报错提示配置。
 function Get-N8nEntrypoint {
     $srv = $script:Config.Service
     $cands = New-Object System.Collections.ArrayList
 
-    # ① 配置的入口（绝对路径）
+    # ① 便携 node 目录（自包含）
+    $setup = $script:Config.Setup
+    if ($setup.Enabled -and -not [string]::IsNullOrWhiteSpace($setup.NodeVersion)) {
+        [void]$cands.Add((Join-Path $setup.ToolsDir "node-$($setup.NodeVersion)\node_modules\n8n\bin\n8n"))
+    }
+    # ② 配置的入口（绝对路径）
     if ($srv.Arguments.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($srv.Arguments[0])) {
         [void]$cands.Add([string]$srv.Arguments[0])
     }
-    # ② 本地安装（工作目录下 node_modules）
+    # ③ 本地安装（工作目录下 node_modules）
     if (-not [string]::IsNullOrWhiteSpace($srv.WorkingDir)) {
         [void]$cands.Add((Join-Path $srv.WorkingDir 'node_modules\n8n\bin\n8n'))
     }
-    # ③ 全局安装（npm root -g）
+    # ④ 全局安装（npm root -g）
     $npmRoot = ''
     $npmCmd = Get-Command 'npm' -ErrorAction SilentlyContinue
     if ($npmCmd -and $npmCmd.Source) {
         try { $npmRoot = (& $npmCmd.Source root -g 2>$null | Out-String).Trim() } catch { }
     }
     if (-not $npmRoot) {
-        # npm 不在 PATH：用便携 node 同目录的 npm.cmd（Setup 自动安装场景）
-        $nodeExe = Get-NodeExecutable
-        $npmPath = Join-Path (Split-Path $nodeExe -Parent) 'npm.cmd'
-        if (Test-Path $npmPath) {
-            try { $npmRoot = (& $npmPath root -g 2>$null | Out-String).Trim() } catch { }
+        # npm 不在 PATH：用便携 node 目录的 npm.cmd（Setup 自动安装场景）。
+        # 不要用 Get-NodeExecutable 返回值推断目录——全失效时它返回字面量 'node'，
+        # Split-Path 得空串会抛错（$ErrorActionPreference='Stop' 下终止，
+        # 干净机器 PATH 无 node 时正好触发，会卡死自动安装检测）。
+        $setup = $script:Config.Setup
+        if ($setup.Enabled -and -not [string]::IsNullOrWhiteSpace($setup.NodeVersion)) {
+            $nodeDir = Join-Path $setup.ToolsDir "node-$($setup.NodeVersion)"
+            $npmPath = Join-Path $nodeDir 'npm.cmd'
+            if (Test-Path $npmPath) {
+                try { $npmRoot = (& $npmPath root -g 2>$null | Out-String).Trim() } catch { }
+            }
         }
     }
     if (-not [string]::IsNullOrWhiteSpace($npmRoot)) {
         [void]$cands.Add((Join-Path $npmRoot 'n8n\bin\n8n'))
     }
-    # ④ PATH 中 n8n.cmd shim，解析其内部 %~dp0\...\n8n\bin\n8n 真实 JS 入口
+    # ⑤ PATH 中 n8n.cmd shim，解析其内部 %~dp0\...\n8n\bin\n8n 真实 JS 入口
     $shim = Get-Command 'n8n.cmd' -ErrorAction SilentlyContinue
     if ($shim -and $shim.Source -and (Test-Path $shim.Source)) {
         try {
@@ -133,8 +145,9 @@ function Test-SetupStep {
             return (Test-NodeAvailable)
         }
         'npm-install' {
-            $pkgName = ($install.Package -split '@')[0]
-            return (Test-Path (Join-Path $install.Prefix "node_modules\$pkgName"))
+            # 已装判定用「入口可探测到」：便携/本地/全局任意一种方式装过都算已就绪。
+            # 不要用本机绝对路径检测（自包含/换机器后该路径不存在，会误判触发重装）。
+            return [bool](Get-N8nEntrypoint)
         }
         'shell' {
             if ($install.DetectScript) {
@@ -203,9 +216,9 @@ function Install-NodePortable {
         if (-not (Test-Path $tools)) { New-Item -ItemType Directory -Path $tools -Force | Out-Null }
         $zipUrl = "$($setup.NodeMirror)$version/node-$version-win-x64.zip"
         $zipFile = Join-Path $tools "node-$version.zip"
-        Write-SetupProgress @{ running=$true; step=$index; stepCount=$total; stepName=$step.Name; percent=0; message="下载 node $version ..."; mode='bar' }
+        Write-SetupProgress @{ running=$true; step=$index; stepCount=$total; stepName=$step.Name; percent=0; message="下载 node-$version-win-x64.zip ..."; mode='bar' }
         if (-not (Download-File $zipUrl $zipFile $index $total)) { return $false }
-        Write-SetupProgress @{ running=$true; step=$index; stepCount=$total; stepName=$step.Name; percent=90; message="解压 node $version ..."; mode='marquee' }
+        Write-SetupProgress @{ running=$true; step=$index; stepCount=$total; stepName=$step.Name; percent=90; message="解压 → $tools\node-$version ..."; mode='marquee' }
         try {
             Expand-Archive -Path $zipFile -DestinationPath $tools -Force
         } catch {
@@ -253,7 +266,8 @@ function Download-File {
                 $pct = [int]($downloaded * 100 / $total)
                 if ($pct -ge ($script:_lastPct + 2) -or $pct -le 0) {
                     $script:_lastPct = $pct
-                    $msg = "$pct% ($([math]::Round($downloaded/1MB,1)) / $([math]::Round($total/1MB,1)) MB)"
+                    $fname = Split-Path $outFile -Leaf
+                    $msg = "$fname  $pct% ($([math]::Round($downloaded/1MB,1)) / $([math]::Round($total/1MB,1)) MB)"
                     Write-SetupProgress @{ running=$true; step=$stepIndex; stepCount=$stepTotal; stepName='下载 node'; percent=$pct; message=$msg; mode='bar' }
                 }
             }
@@ -269,7 +283,13 @@ function Download-File {
     }
 }
 
-# npm-install: 用便携 node 的 npm 安装包到 Prefix
+# npm-install: 用便携 node 的 npm 安装包（Prefix 留空 = 自包含装到便携 node 目录）
+# 输出经 cmd.exe 重定向到文件，主线程轮询读文件实时显示"正在下载的依赖包"。
+# ⚠️ PS5.1 两个坑（2026-08-22 分发模拟实测）：
+#   ① 不能用 $p.RedirectStandardOutput + BeginOutputReadLine/.NET 事件 handler——
+#      异步读线程的 scriptblock 访问 $script: 变量不可靠，Add() 抛异常会
+#      native crash（powershell 进程直接退出）；$p.OutputDataReceived += {} 语法也失败。
+#   ② 不能调用无参 WaitForExit()——同样 native crash。文件重定向 + HasExited 轮询最稳。
 function Install-NpmPackage {
     param($step, [int]$index, [int]$total)
     $setup = $script:Config.Setup
@@ -280,36 +300,82 @@ function Install-NpmPackage {
         Write-CtrlLog "npm 不存在: $npmCmd"
         return $false
     }
+    # Prefix 留空 = 自包含：装到便携 node 目录（免管理员、可整体拷贝）
     $prefix = $step.Install.Prefix
+    if ([string]::IsNullOrWhiteSpace($prefix)) { $prefix = $nodeDir }
     if (-not (Test-Path $prefix)) { New-Item -ItemType Directory -Path $prefix -Force | Out-Null }
     $pkg = $step.Install.Package
-    Write-SetupProgress @{ running=$true; step=$index; stepCount=$total; stepName=$step.Name; percent=0; message="npm install $pkg (可能需要几分钟)..."; mode='marquee' }
 
+    # 预置 package.json + overrides：强制 prebuild-install 7.1.3。
+    # prebuild-install 7.1.2 依赖的 napi-build-utils 1.0.1 有 N-API 字符串比较 bug：
+    # node 22 的 process.versions.napi='10'（两位数），getBestNapiBuildVersion() 里
+    # '3'/'6' <= '10' 按字典序为 false → 返回 undefined → prebuild 下载被跳过 →
+    # 干净机无编译工具链时 node-gyp 编译必失败（sqlite3 等原生包，2026-08-22
+    # 模拟实测）。7.1.3 改用 napi-build-utils ^2.0.0 已修复，所有原生包正常走
+    # 预编译二进制下载，无需编译工具链。package.json 必须无 BOM（JSON.parse 遇
+    # BOM 报错）；内容纯 ASCII。
+    $pkgJson = Join-Path $prefix 'package.json'
+    $pkgObj = $null
+    if (Test-Path $pkgJson) { try { $pkgObj = Get-Content $pkgJson -Raw | ConvertFrom-Json } catch { $pkgObj = $null } }
+    if (-not $pkgObj) { $pkgObj = [ordered]@{ name = 'n8n-portable'; version = '1.0.0'; private = $true } }
+    if (-not $pkgObj.overrides) {
+        $pkgObj | Add-Member -NotePropertyName overrides -NotePropertyValue ([ordered]@{ 'prebuild-install' = '7.1.3' }) -Force
+    } else {
+        $pkgObj.overrides.'prebuild-install' = '7.1.3'
+    }
+    [System.IO.File]::WriteAllText($pkgJson, ($pkgObj | ConvertTo-Json -Depth 5))
+
+    $runDir = $script:Config.Paths.RunDir
+    if (-not (Test-Path $runDir)) { New-Item -ItemType Directory -Path $runDir -Force | Out-Null }
+    $npmOutFile = Join-Path $runDir "$($script:Config.Instance).npm-out.log"
+    Remove-Item $npmOutFile -Force -ErrorAction SilentlyContinue
     $log = Join-Path $script:Config.Paths.LogDir 'setup.log'
     try {
         $p = New-Object System.Diagnostics.Process
-        $p.StartInfo.FileName = $npmCmd
-        $p.StartInfo.Arguments = "install $pkg --prefix `"$prefix`" --registry $($setup.NpmRegistry) --no-audit --no-fund"
+        $p.StartInfo.FileName = Join-Path $env:SystemRoot 'System32\cmd.exe'
+        # --loglevel=notice：输出精简，便于实时提取当前 fetch 的包
+        # /s /c "命令 >文件 2>&1"：外层引号必须（cmd 对 /c 后引号有特殊解析）。
+        # stdout/stderr 合并到同一文件——npm 的 http fetch 日志走 stderr，
+        # 必须 2>&1 才能实时提取正在下载的包名（2026-08-22 模拟实测 stdout 为空）。
+        $inner = "`"$npmCmd`" install $pkg --prefix `"$prefix`" --registry $($setup.NpmRegistry) --no-audit --no-fund --loglevel=notice"
+        $p.StartInfo.Arguments = "/s /c `"$inner 1>`"$npmOutFile`" 2>&1`""
         $p.StartInfo.WorkingDirectory = $prefix
         $p.StartInfo.UseShellExecute = $false
         $p.StartInfo.CreateNoWindow = $true
-        $p.StartInfo.RedirectStandardOutput = $true
-        $p.StartInfo.RedirectStandardError = $true
+        # 关键：npm 的子进程（oracledb 等 postinstall 脚本直接调 node）继承启动
+        # 环境 PATH。干净分发机 PATH 无 node → postinstall 报 "'node' 不是内部或
+        # 外部命令" → npm 整体失败（2026-08-22 模拟实测）。注入便携 node 目录。
+        $p.StartInfo.EnvironmentVariables['PATH'] = "$nodeDir;" + $env:PATH
         [void]$p.Start()
+
         # 安装超时：受限环境不卡死，超时终止进程并报错
         $npmTimeoutMs = 600000
         if ($script:Config.Setup.InstallTimeoutSec) { $npmTimeoutMs = $script:Config.Setup.InstallTimeoutSec * 1000 }
-        if (-not $p.WaitForExit($npmTimeoutMs)) {
-            try { $p.Kill() } catch { }
-            Write-CtrlLog "npm install 超时(>$($npmTimeoutMs / 1000) s)，已终止"
-            return $false
+
+        # 轮询 HasExited（属性，不阻塞；不能无参 WaitForExit——会 native crash），
+        # 期间读输出文件尾部，把最新下载的 .tgz 包名实时写到进度文件
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $lastPkg = ''
+        while (-not $p.HasExited) {
+            if ($sw.Elapsed.TotalMilliseconds -gt $npmTimeoutMs) {
+                try { $p.Kill() } catch { }
+                Write-CtrlLog "npm install 超时(>$($npmTimeoutMs / 1000) s)，已终止"
+                return $false
+            }
+            if (Test-Path $npmOutFile) {
+                foreach ($line in (Get-Content $npmOutFile -Tail 20 -ErrorAction SilentlyContinue)) {
+                    if ($line -match 'fetch.*?([\w@.\-]+\.tgz)') { $lastPkg = $matches[1] }
+                }
+            }
+            $msg = if ($lastPkg) { "正在下载依赖包: $lastPkg" } else { "npm install $pkg (可能需要几分钟)..." }
+            Write-SetupProgress @{ running=$true; step=$index; stepCount=$total; stepName=$step.Name; percent=50; message=$msg; mode='marquee' }
+            Start-Sleep -Milliseconds 500
         }
-        $out = $p.StandardOutput.ReadToEnd()
-        $err = $p.StandardError.ReadToEnd()
-        $p.WaitForExit()
+        # 进程已退出：短等文件 flush，读完整输出写 setup.log 备查
+        Start-Sleep -Milliseconds 300
+        $out = if (Test-Path $npmOutFile) { Get-Content $npmOutFile -Raw -ErrorAction SilentlyContinue } else { '' }
         Add-Content -Path $log -Value "--- npm install $pkg ---" -Encoding UTF8
         if ($out) { Add-Content -Path $log -Value $out -Encoding UTF8 }
-        if ($err) { Add-Content -Path $log -Value $err -Encoding UTF8 }
         if ($p.ExitCode -ne 0) {
             Write-CtrlLog "npm install 失败(退出码 $($p.ExitCode))，详见 setup.log"
             return $false
@@ -319,7 +385,10 @@ function Install-NpmPackage {
         return $false
     }
     $pkgName = ($pkg -split '@')[0]
-    return (Test-Path (Join-Path $prefix "node_modules\$pkgName"))
+    $pkgDir = Join-Path $prefix "node_modules\$pkgName"
+    $installed = Test-Path $pkgDir
+    Write-SetupProgress @{ running=$true; step=$index; stepCount=$total; stepName=$step.Name; percent=100; message=$(if ($installed) { "已安装 $pkgName ✓" } else { "未找到 $pkgName（安装可能失败）" }); mode='bar' }
+    return $installed
 }
 
 # shell: 执行自定义命令（初始化目录/写配置）
@@ -327,7 +396,9 @@ function Invoke-ShellStep {
     param($step, [int]$index, [int]$total)
     $script = $step.Install.Script
     if ([string]::IsNullOrWhiteSpace($script)) { return $true }
-    Write-SetupProgress @{ running=$true; step=$index; stepCount=$total; stepName=$step.Name; percent=0; message="初始化 $($step.Name) ..."; mode='marquee' }
+    $firstLine = (($script -split "`r?`n") | Where-Object { $_.Trim() } | Select-Object -First 1)
+    $desc = if ($firstLine) { $firstLine.Trim() } else { $step.Name }
+    Write-SetupProgress @{ running=$true; step=$index; stepCount=$total; stepName=$step.Name; percent=0; message="执行: $desc ..."; mode='marquee' }
     try {
         & ([scriptblock]::Create($script))
         Write-CtrlLog "步骤完成: $($step.Name)"

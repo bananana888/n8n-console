@@ -17,21 +17,17 @@
     Service = @{
         # 后台进程描述
         Name = 'n8n'
-        # 必须用绝对路径指向 node 22.22.2！
-        # 原因: n8n 2.35.x 要求 node >=22.22，PATH 里的 node 若版本过低会"启动即退"
-        #       （Your Node.js version ... not supported）。
-        # 公司机: C:\Users\SCY004730\.workbuddy\binaries\node\versions\22.22.2\node.exe
-        # 家用机: C:\Users\Allen\.workbuddy\binaries\node\versions\22.22.2\node.exe
-        # 若该绝对路径失效（如 workbuddy 目录被清理），脚本会回退 PATH 中的 node，
-        # 安装 node >=22.22 并加入 PATH 即可，无需改配置。
-        Executable  = 'C:\Users\Allen\.workbuddy\binaries\node\versions\22.22.2\node.exe'
-        # 传给 Executable 的参数（n8n 可执行文件入口）
-        # 公司机: D:\APP\n8n\node_modules\n8n\bin\n8n（npm 本地安装）
-        # 家用机: D:\npm-global\node_modules\n8n\bin\n8n（npm 全局安装）
-        # 入口路径若失效，脚本会自动探测（本地 node_modules / npm root -g / PATH），
-        # 探测到真实入口后替换并写日志，无需手动改。
-        Arguments   = @('D:\npm-global\node_modules\n8n\bin\n8n', 'start')
-        WorkingDir  = 'D:\npm-global'
+        # 运行 node 的可执行文件。'node' = 用 PATH 中的 node；脚本按
+        # 「便携 node(tools\) → 本配置 → PATH」逐级回退。便携 node 由 Setup
+        # 自动装到 tools\node-<版本>（免管理员），优先于 PATH。
+        # n8n 2.35.x 要求 node >=22.22：版本过低会"启动即退"。无需填本机
+        # 绝对路径 —— 换机器/换目录拷贝即用，旧机器的绝对路径失效会自动回退。
+        Executable  = 'node'
+        # 传给 Executable 的参数（n8n 可执行文件入口）。留空 = 自动探测：
+        # 便携 node 目录 → 工作目录 node_modules → npm root -g → PATH 中 n8n.cmd，
+        # 探测到真实入口后自动带上，无需手动填本机路径。
+        Arguments   = @()
+        WorkingDir  = ''            # 留空 = 控制台根目录（n8n 不依赖启动目录）
         # 进程名（用于 PID 校验，防 PID 被系统复用误判）；留空自动从 Executable 推导
         ProcessName = 'node'
 
@@ -51,19 +47,17 @@
         # 注入给子进程的环境变量
         Env = @{
             # 注意: n8n 2.x 会把 .n8n 拼到 N8N_USER_FOLDER 之后作为真实数据目录。
-            # 公司机曾设 D:\APP\n8n\.n8n，真实数据落在 .n8n\.n8n 双嵌套目录。
-            # 家用机数据在默认 C:\Users\Allen\.n8n，因此【不要】设此变量，
-            # 否则会拼出 \.n8n\.n8n 错误路径——这是两机最关键的差异。
-            # 'N8N_USER_FOLDER'     = 'C:\Users\Allen\.n8n'   # ← 不要启用！
+            # 默认不设此变量：n8n 数据落在默认用户目录 %USERPROFILE%\.n8n（最通用）。
+            # 若要自定义务必理解双嵌套行为（会拼成 N8N_USER_FOLDER\.n8n）。
+            # 'N8N_USER_FOLDER'     = ''   # ← 默认留空即可
             # N8N_LOG_FILE 若未在此指定，会自动取 Logs.Stdout 的绝对路径
-            # 'N8N_LOG_FILE'      = 'D:\APP\n8n-console\logs\n8n.log'
-            # 禁用 task runner / Python runner：本机无 Python，避免 n8n 启动即退
+            # 禁用 task runner / Python runner：部分机器无 Python，避免 n8n 启动即退
             'N8N_RUNNERS_ENABLED' = 'false'
             'N8N_PYTHON_ENABLED'  = 'false'
-            # ★ 家用机关键：系统有代理(HTTP_PROXY=127.0.0.1:7897 且 NODE_USE_ENV_PROXY=1)，
-            #   node 22.22 的 undici 走 EnvHttpProxyAgent，n8n 的 license 等外部请求经代理挂起，
-            #   导致启动卡死(进程活着但永不监听 5678)。设 0 让 n8n 进程直连外网。
-            #   2026-08-22 实测：不清代理时 n8n 卡 30s+，设此变量后 12s 内就绪。公司机无代理可注释掉。
+            # 系统有代理(HTTP_PROXY 且 NODE_USE_ENV_PROXY=1)时，node 22.x 的 undici 走
+            # EnvHttpProxyAgent，n8n 外部请求(license 等)经代理可能挂起导致启动卡死。
+            # 设 0 让 n8n 进程直连外网（2026-08-22 实测：不清代理卡 30s+，设后 12s 就绪）。
+            # 无代理的机器此变量无副作用，可保留。
             'NODE_USE_ENV_PROXY'  = '0'
         }
     }
@@ -101,16 +95,16 @@
             },
             @{
                 Name = 'n8n 本体'
-                Detect = 'D:\npm-global\node_modules\n8n 存在'
+                Detect = 'n8n 可执行入口可探测到（便携/本地/全局任意一种）'
                 Install = @{
                     Kind    = 'npm-install'   # 内置类型：用便携 node 的 npm 安装
-                    Package = 'n8n@2.35.7'    # 家用机已装的全局版本（公司机曾是本地 2.35.4）
-                    Prefix  = 'D:\npm-global' # npm 全局 prefix（家用机；公司机本地安装时是 D:\APP\n8n）
+                    Package = 'n8n@2.35.7'    # 无 Prefix 时自包含：装到便携 node 目录 tools\node-<版本>
+                    # Prefix = '...'          # 可选：指定其它安装位置（如 npm 全局 prefix）
                 }
             },
             @{
                 Name = 'n8n 数据目录'
-                Detect = 'C:\Users\Allen\.n8n 存在'
+                Detect = 'n8n 默认数据目录 %USERPROFILE%\.n8n 存在'
                 Install = @{
                     Kind = 'shell'           # 内置类型：执行 PowerShell 命令
                     DetectScript = 'Test-Path "$env:USERPROFILE\.n8n"'

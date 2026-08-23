@@ -141,10 +141,15 @@ function Get-Config {
         Write-Host "警告: Service.Executable 未配置，服务将无法启动" -ForegroundColor Yellow
     }
     if (-not $cfg.Service.Arguments -or $cfg.Service.Arguments.Count -eq 0) {
-        Write-Host "警告: Service.Arguments 未配置（将只启动可执行文件，不带参数）" -ForegroundColor Yellow
+        if ($cfg.Setup.Enabled) {
+            Write-Host "提示: Service.Arguments 未配置，启动时将自动探测服务入口" -ForegroundColor Gray
+        } else {
+            Write-Host "警告: Service.Arguments 未配置（将只启动可执行文件，不带参数）" -ForegroundColor Yellow
+        }
     }
     if ([string]::IsNullOrWhiteSpace($cfg.Service.WorkingDir)) {
-        Write-Host "警告: Service.WorkingDir 未配置（默认使用控制台根目录）" -ForegroundColor Yellow
+        $cfg.Service.WorkingDir = $Root
+        Write-Host "提示: Service.WorkingDir 未配置，默认使用控制台根目录" -ForegroundColor Gray
     }
 
     return $cfg

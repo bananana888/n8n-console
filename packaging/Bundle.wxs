@@ -2,15 +2,31 @@
 <!-- ============================================================
      n8n 控制台 引导安装程序（setup.exe）
      WiX Burn Bootstrapper：内部链式安装 setup.msi
-     编译: candle Bundle.wxs -dMsiPath=... + light -ext WixBalExtension.dll
+     编译: candle Bundle.wxs -dMsiPath=... -dLicenseRtf=... + light -ext WixBalExtension.dll
+     - 许可页: 显示正式 MIT 许可（license.rtf，替代默认 Lorem ipsum 占位文本）
+     - 目录选择: 标准 BA 的"选项"按钮可改安装位置（InstallFolder → MsiProperty INSTALLFOLDER）
      ============================================================ -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
      xmlns:bal="http://schemas.microsoft.com/wix/BalExtension">
   <Bundle Name="n8n 控制台" Version="4.0.0" Manufacturer="bananana888"
           UpgradeCode="D3A7F8B2-9C4E-4E1A-8F2B-6C5D9E1A7B3E">
-    <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.RtfLicense" />
+    <!-- 默认安装目录：与 MSI 默认 %LOCALAPPDATA%\n8n-console 一致；
+         bal:Overridable 使其显示在"选项"页，用户可改 -->
+    <Variable Name="InstallFolder" Type="string" Value="[LocalAppDataFolder]n8n-console" bal:Overridable="yes" />
+
+    <!-- 显示"选项"按钮（改安装目录）；许可主题用 RtfLicense。
+         LicenseFile 指定正式 MIT 许可（candle 用 -dLicenseRtf 传入），
+         必须显式设置此属性，否则 WixStdBA 渲染默认 Lorem ipsum 占位文本 -->
+    <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.RtfLicense">
+      <bal:WixStandardBootstrapperApplication LicenseFile="$(var.LicenseRtf)" SuppressOptionsUI="no" />
+    </BootstrapperApplicationRef>
+
     <Chain>
-      <MsiPackage SourceFile="$(var.MsiPath)" DisplayInternalUI="yes" />
+      <!-- DisplayInternalUI 不开启：不在 Burn 内嵌 MSI 对话框（社区反馈体验差），
+           安装目录经 MsiProperty 传给 MSI，覆盖其默认目录 -->
+      <MsiPackage SourceFile="$(var.MsiPath)">
+        <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
+      </MsiPackage>
     </Chain>
   </Bundle>
 </Wix>

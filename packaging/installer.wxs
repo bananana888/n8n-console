@@ -16,6 +16,10 @@
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     <UIRef Id="WixUI_InstallDir" />
 
+    <!-- 许可协议页显示正式 MIT 许可（license.rtf，与 setup.exe 共用同一份；
+         缺此变量时 WixUI_InstallDir 的许可页显示 WiX 内置默认文本） -->
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="LocalAppDataFolder">
         <Directory Id="INSTALLFOLDER" Name="n8n-console" />
@@ -29,7 +33,12 @@
       <Component Id="DesktopShortcut" Guid="D3A7F8B2-9C4E-4E1A-8F2B-6C5D9E1A7B3D">
         <Shortcut Id="DesktopShortcutN8n" Directory="DesktopFolder" Name="n8n 控制台"
                   Target="[INSTALLFOLDER]n8n-console.exe"
-                  WorkingDirectory="INSTALLFOLDER" />
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="n8n.ico">
+          <!-- WiX v3 中 Icon 元素须作为 Shortcut 子元素（不能放 Component 下）；
+               Id 带 .ico 扩展名符合 MSI Icon 表命名规范 -->
+          <Icon Id="n8n.ico" SourceFile="$(var.SourceDir)\assets\n8n.ico" />
+        </Shortcut>
         <RemoveFolder Id="DesktopShortcutRemove" On="uninstall" />
         <RegistryValue Root="HKCU" Key="Software\n8n-console" Name="installed" Type="integer" Value="1" KeyPath="yes" />
       </Component>

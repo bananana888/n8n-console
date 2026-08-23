@@ -20,11 +20,12 @@
     Service = @{
         # ★ 服务显示名（GUI 标题/提示文案用）
         Name         = 'my-service'
-        # ★ 启动命令或可执行文件绝对路径（node 可用 PATH 名或绝对路径）
+        # ★ 启动命令或可执行文件：可填 PATH 命令名（如 'node'）或绝对路径
         Executable   = 'node'
-        # ★ 传给 Executable 的参数（如 n8n 是 node_modules\n8n\bin\n8n + start）
+        # ★ 传给 Executable 的参数。可留空自动探测服务入口（n8n 适用）；
+        #   或显式填，如 @('D:\path\to\app.js', 'start')
         Arguments    = @('D:\path\to\app.js', 'start')
-        # ★ 工作目录（相对路径/配置文件以它为基准）
+        # ★ 工作目录（相对路径/配置文件以它为基准）；留空 = 控制台根目录
         WorkingDir   = 'D:\path\to'
         # 进程名（PID 校验，防 PID 复用误判）；留空自动从 Executable 推导
         ProcessName  = 'node'

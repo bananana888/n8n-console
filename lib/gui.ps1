@@ -493,11 +493,23 @@ function Show-Gui {
     $script:_lblHint = $null
     $script:_form = $null
 
-    # 加载图标
+    # 加载图标：首选 assets\n8n.ico，失败则从同目录 n8n-console.exe 提取兜底
+    # （Win11 标题栏不显示窗口图标属系统行为；任务栏/Alt-Tab 图标来自 $form.Icon）
     $iconPath = $script:Config.Paths.Icon
     $formIcon = $null
     if (Test-Path $iconPath) {
-        try { $formIcon = New-Object System.Drawing.Icon $iconPath } catch { }
+        try { $formIcon = New-Object System.Drawing.Icon $iconPath } catch {
+            Write-CtrlLog "加载窗口图标失败: $iconPath ($($_.Exception.Message))"
+        }
+    }
+    if (-not $formIcon) {
+        # 兜底：从启动器 exe 提取关联图标（拷贝/精简场景 assets 缺失时仍能显示）
+        $exePath = Join-Path $script:Config.Paths.Home 'n8n-console.exe'
+        if (Test-Path $exePath) {
+            try { $formIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($exePath) } catch {
+                Write-CtrlLog "从 exe 提取图标失败: $exePath ($($_.Exception.Message))"
+            }
+        }
     }
 
     # 表单
