@@ -111,8 +111,13 @@ function Clear-FrontendCache {
 
 # ---------- 健康检查 ----------
 # 传入 $procId 时，若进程已死立即返回 $false（避免"启动即退"白等满超时）
-function Wait-ManagedHealthy([string]$url, [int]$port, [int]$timeoutSec, [int]$procId = 0) {
+# $readyUrl 可选：后端(healthz)就绪后再等前端资源就绪。n8n 2.35 每次启动会把前端
+# 资源重新生成到 ~\.cache\n8n（约 30-60 秒），期间访问 / 返回 404 "Cannot GET /"，
+# 等它 200 再返回，避免健康检查通过后打开浏览器撞上 404 窗口。
+function Wait-ManagedHealthy([string]$url, [int]$port, [int]$timeoutSec, [int]$procId = 0, [string]$readyUrl = '') {
+    # 阶段1: 后端就绪（原逻辑，超时按启动失败处理）
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $backendOk = $false
     while ($sw.Elapsed.TotalSeconds -lt $timeoutSec) {
         Start-Sleep -Milliseconds 500
         if ($procId -gt 0 -and -not (Get-Process -Id $procId -ErrorAction SilentlyContinue)) {
@@ -121,12 +126,32 @@ function Wait-ManagedHealthy([string]$url, [int]$port, [int]$timeoutSec, [int]$p
         if (Test-PortOpen $port) {
             try {
                 $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
-                if ($r.StatusCode -eq 200) { return $true }
+                if ($r.StatusCode -eq 200) { $backendOk = $true; break }
             } catch {
                 # 端口开但请求失败，继续等
             }
         }
     }
+    if (-not $backendOk) { return $false }
+
+    # 阶段2: 前端就绪（可选）。120 秒仍未 200 视为异常（资源缺失/极慢环境），
+    # 按失败处理并记日志；进程仍保留，可稍后手动访问确认。
+    if ([string]::IsNullOrWhiteSpace($readyUrl)) { return $true }
+    $fsw = [System.Diagnostics.Stopwatch]::StartNew()
+    $frontTimeout = 120
+    while ($fsw.Elapsed.TotalSeconds -lt $frontTimeout) {
+        Start-Sleep -Milliseconds 500
+        if ($procId -gt 0 -and -not (Get-Process -Id $procId -ErrorAction SilentlyContinue)) {
+            return $false
+        }
+        try {
+            $r2 = Invoke-WebRequest -Uri $readyUrl -UseBasicParsing -TimeoutSec 2
+            if ($r2.StatusCode -eq 200) { return $true }
+        } catch {
+            # 前端未就绪（缓存重建中），继续等
+        }
+    }
+    Write-CtrlLog "警告: 前端资源 ${frontTimeout}s 内未就绪(访问 $readyUrl 仍非200)，按启动失败处理。进程仍在，可稍后手动访问确认。"
     return $false
 }
 
@@ -235,7 +260,8 @@ function Start-ManagedService {
         Write-CtrlLog "启动中: $($proc.ProcessName) PID $($proc.Id), $($srv.Name)"
 
         # 健康自检（传入进程 ID：进程若启动即退，立即失败不用等满超时）
-        $ok = Wait-ManagedHealthy $srv.HealthUrl $srv.Port $srv.HealthTimeoutSec $proc.Id
+        # 后端就绪后再等前端资源就绪（避免打开浏览器撞上 n8n 前端缓存重建的 404 窗口）
+        $ok = Wait-ManagedHealthy $srv.HealthUrl $srv.Port $srv.HealthTimeoutSec $proc.Id $srv.EditorUrl
         if ($ok) {
             # 稳定性复检：等一小段窗口再确认进程仍存活且端口仍在监听，
             # 抓"端口已开但随后崩溃"(如前端资源 EPERM 锁) 的延迟崩溃
