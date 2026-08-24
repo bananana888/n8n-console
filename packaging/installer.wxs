@@ -6,7 +6,7 @@
      安装位置: 默认 %LOCALAPPDATA%\n8n-console（perUser，免管理员），安装时可改
      ============================================================ -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="*" Name="n8n 控制台" Language="2052" Version="4.0.0"
+  <Product Id="*" Name="n8n 控制台" Language="2052" Version="$(var.ProductVersion)"
            Manufacturer="bananana888" UpgradeCode="D3A7F8B2-9C4E-4E1A-8F2B-6C5D9E1A7B3C" Codepage="65001">
     <Package InstallerVersion="200" Compressed="yes" InstallScope="perUser" Manufacturer="bananana888" />
     <MajorUpgrade DowngradeErrorMessage="已安装更高版本，无法降级。" />

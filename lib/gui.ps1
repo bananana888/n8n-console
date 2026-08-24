@@ -533,8 +533,10 @@ function Show-Gui {
     Add-Type -AssemblyName System.Windows.Forms | Out-Null
     Add-Type -AssemblyName System.Drawing | Out-Null
 
-    # 单实例锁：防止重复打开控制台（已有实例则提示并退出）
-    $script:appMutex = New-Object System.Threading.Mutex($false, 'n8n-console')
+    # 单实例锁：防止重复打开控制台（已有实例则提示并退出）。
+    # 名字带 Local\ 会话局部前缀 + 脚本路径哈希，避免跨会话误锁，也防止其它程序预创建同名全局互斥体干扰
+    $mutexName = 'Local\n8n-console-' + ([BitConverter]::ToString([System.Security.Cryptography.MD5]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($PSScriptRoot)))).Replace('-', '').Substring(0, 16)
+    $script:appMutex = New-Object System.Threading.Mutex($false, $mutexName)
     if (-not $script:appMutex.WaitOne(0)) {
         try {
             [System.Windows.Forms.MessageBox]::Show("控制台已有一个实例在运行，请切换到已打开的窗口。", "n8n 控制台") | Out-Null

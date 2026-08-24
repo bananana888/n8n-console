@@ -20,7 +20,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$script:AppVersion = '4.1.3'
+$script:AppVersion = '4.1.4'
 
 # ---------- 加载配置（-ConfigFile 支持多实例壳子，默认 n8n.config.psd1）----------
 . (Join-Path $PSScriptRoot "lib\config.ps1")
@@ -66,7 +66,7 @@ try {
                 $names = ($missing | ForEach-Object { $_.Name }) -join "、"
                 if ($Silent) {
                     Write-FatalLog "环境缺失，需要安装: $names。请打开控制台 GUI 触发自动安装。"
-                    Show-Msg "环境缺失，需要安装: $names`n`n请打开控制台 GUI，点"启动"触发自动安装。"
+                    Show-Msg "环境缺失，需要安装: $names`n`n请打开控制台 GUI，点『启动』按钮触发自动安装。"
                     return
                 }
                 if (Show-YesNo "检测到缺少环境: $names`n`n需要自动安装，是否继续？") {

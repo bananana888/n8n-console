@@ -23,11 +23,19 @@ function Rotate-LogFile {
 }
 
 function Write-CtrlLog([string]$msg) {
-    Rotate-LogFile $script:Config.Paths.ControlLog
-    Add-Content -Path $script:Config.Paths.ControlLog -Value ("[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $msg) -Encoding UTF8
+    try {
+        Rotate-LogFile $script:Config.Paths.ControlLog
+        Add-Content -Path $script:Config.Paths.ControlLog -Value ("[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $msg) -Encoding UTF8
+    } catch {
+        # 日志写入失败（文件被锁/权限不足）不阻断主流程，静默降级
+    }
 }
 
 function Write-FatalLog([string]$msg) {
-    Rotate-LogFile $script:Config.Paths.FatalLog
-    Add-Content -Path $script:Config.Paths.FatalLog -Value ("[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $msg) -Encoding UTF8
+    try {
+        Rotate-LogFile $script:Config.Paths.FatalLog
+        Add-Content -Path $script:Config.Paths.FatalLog -Value ("[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $msg) -Encoding UTF8
+    } catch {
+        # 日志写入失败不阻断主流程（致命错误本身已由调用方处理）
+    }
 }

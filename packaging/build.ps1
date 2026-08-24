@@ -16,6 +16,12 @@ $tools = Join-Path $PSScriptRoot 'tools'
 $release = Join-Path $Root 'release'
 New-Item -ItemType Directory -Path $tools, $release -Force | Out-Null
 
+# 从主脚本读取应用版本号，注入 WiX（安装包版本与应用版本保持一致，避免 MajorUpgrade 版本误判）
+$verMatch = Select-String -Path (Join-Path $Root 'n8n.ps1') -Pattern "AppVersion\s*=\s*'([\d.]+)'" | Select-Object -First 1
+if (-not $verMatch) { throw '无法从 n8n.ps1 解析 AppVersion' }
+$appVersion = $verMatch.Matches[0].Groups[1].Value
+Write-Host "==> 应用版本: $appVersion（注入安装包）" -ForegroundColor Cyan
+
 Write-Host '==> 0/3 编译启动器 n8n-console.exe' -ForegroundColor Cyan
 $csc = Join-Path $env:windir 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path $csc)) { $csc = Join-Path $env:windir 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
@@ -57,7 +63,7 @@ if ($LASTEXITCODE -ne 0) { throw "heat 失败(退出码 $LASTEXITCODE)" }
 # 3.2 编译 MSI（-out 让 wixobj 输出到 packaging\，与后续 light 对齐；
 #      -sice 抑制 per-user 安装的 ICE 建议性检查 ICE38/ICE64/ICE91；
 #      -dLicenseRtf 供 WixUILicenseRtf 变量，让 MSI 许可页显示正式 MIT）
-& $candle (Join-Path $PSScriptRoot 'installer.wxs') (Join-Path $PSScriptRoot 'Components.wxs') -dSourceDir="$stage" -dLicenseRtf="$PSScriptRoot\license.rtf" -out "$PSScriptRoot/"
+& $candle (Join-Path $PSScriptRoot 'installer.wxs') (Join-Path $PSScriptRoot 'Components.wxs') -dSourceDir="$stage" -dLicenseRtf="$PSScriptRoot\license.rtf" -dProductVersion="$appVersion" -out "$PSScriptRoot/"
 if ($LASTEXITCODE -ne 0) { throw "candle(msi) 失败(退出码 $LASTEXITCODE)" }
 & $light (Join-Path $PSScriptRoot 'installer.wixobj') (Join-Path $PSScriptRoot 'Components.wixobj') -ext (Join-Path $wixDir 'WixUIExtension.dll') -cultures:zh-CN -sice:ICE38 -sice:ICE64 -sice:ICE91 -out (Join-Path $release 'setup.msi')
 if ($LASTEXITCODE -ne 0) { throw "light(msi) 失败(退出码 $LASTEXITCODE)" }
@@ -65,7 +71,7 @@ if ($LASTEXITCODE -ne 0) { throw "light(msi) 失败(退出码 $LASTEXITCODE)" }
 # 3.3 编译 EXE（Burn 引导程序，链装 setup.msi）
 #     -ext WixBalExtension.dll：Bundle 的 bal: 命名空间（许可变量/选项页）需要此扩展，缺了会 CNDL0200/0201
 $msiPath = Join-Path $release 'setup.msi'
-& $candle (Join-Path $PSScriptRoot 'Bundle.wxs') -ext (Join-Path $wixDir 'WixBalExtension.dll') -dMsiPath="$msiPath" -dLicenseRtf="$PSScriptRoot\license.rtf" -out "$PSScriptRoot/"
+& $candle (Join-Path $PSScriptRoot 'Bundle.wxs') -ext (Join-Path $wixDir 'WixBalExtension.dll') -dMsiPath="$msiPath" -dLicenseRtf="$PSScriptRoot\license.rtf" -dProductVersion="$appVersion" -out "$PSScriptRoot/"
 if ($LASTEXITCODE -ne 0) { throw "candle(bundle) 失败(退出码 $LASTEXITCODE)" }
 & $light (Join-Path $PSScriptRoot 'Bundle.wixobj') -ext (Join-Path $wixDir 'WixBalExtension.dll') -out (Join-Path $release 'n8n-console-setup.exe')
 if ($LASTEXITCODE -ne 0) { throw "light(bundle) 失败(退出码 $LASTEXITCODE)" }
