@@ -61,6 +61,10 @@ function Get-N8nEntrypoint {
     if ($setup.Enabled -and -not [string]::IsNullOrWhiteSpace($setup.NodeVersion)) {
         [void]$cands.Add((Join-Path $setup.ToolsDir "node-$($setup.NodeVersion)\node_modules\n8n\bin\n8n"))
     }
+    # ①b 当前文件夹 tools\ 下直接安装的 n8n（系统 node 被采用、便携未下载时的落点）
+    if ($setup.Enabled -and -not [string]::IsNullOrWhiteSpace($setup.ToolsDir)) {
+        [void]$cands.Add((Join-Path $setup.ToolsDir 'node_modules\n8n\bin\n8n'))
+    }
     # ② 配置的入口（绝对路径）
     if ($srv.Arguments.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($srv.Arguments[0])) {
         [void]$cands.Add([string]$srv.Arguments[0])
@@ -152,8 +156,10 @@ function Test-SetupStep {
     $install = $step.Install
     switch ($install.Kind) {
         'node-portable' {
-            # 只判定便携 node 是否就绪：系统即便有全局 node（版本满足），
-            # 也要按配置下载便携 node，保证"换机器拷贝即用"的自包含特性
+            # 策略「先系统后便携」：先看系统/PATH 的 node 是否可用且版本满足
+            # （Test-NodeAvailable 经 Get-NodeExecutable 探测：便携存在时测便携，
+            #  便携缺失时自然回退系统 node），有则视为就绪跳过下载；否则要求便携 node 就绪
+            if (Test-NodeAvailable) { return $true }
             return (Test-PortableNodeReady)
         }
         'npm-install' {
@@ -312,9 +318,14 @@ function Install-NpmPackage {
         Write-CtrlLog "npm 不存在: $npmCmd"
         return $false
     }
-    # Prefix 留空 = 自包含：装到便携 node 目录（免管理员、可整体拷贝）
+    # Prefix 留空时的落点：便携 node 存在 → 自包含装便携 node 目录（免管理员、可整体拷贝）；
+    # 便携不存在（系统 node 被采用、未下载便携）→ 装到当前文件夹 tools\ 下，
+    # 避免把 n8n 写进系统 node 目录污染系统环境
     $prefix = $step.Install.Prefix
-    if ([string]::IsNullOrWhiteSpace($prefix)) { $prefix = $nodeDir }
+    if ([string]::IsNullOrWhiteSpace($prefix)) {
+        if (Test-PortableNodeReady) { $prefix = $nodeDir }
+        else { $prefix = $setup.ToolsDir }
+    }
     if (-not (Test-Path $prefix)) { New-Item -ItemType Directory -Path $prefix -Force | Out-Null }
     $pkg = $step.Install.Package
 

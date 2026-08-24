@@ -72,6 +72,8 @@
 
     # ---------- 环境自检 + 自动安装（控制台"工具箱"能力）----------
     # 点启动时检测下列依赖，缺失则弹确认 → 后台自动安装 → 进度条展示 → 装完继续启动。
+    # 检测策略「先系统后便携」：node 先看系统/PATH 是否有可用 node（版本满足即视为就绪、
+    # 跳过下载），系统缺失才下载便携 node 到 ToolsDir；n8n 按入口探测（便携/本地/全局任一即可）。
     Setup = @{
         Enabled     = $true
         # 便携 node 下载镜像（npmmirror，国内快）
@@ -88,17 +90,17 @@
         Steps = @(
             @{
                 Name = 'node 运行时'
-                Detect = 'node 可执行且版本 >=22.22'
+                Detect = '系统 node 可用（版本满足）或便携 node 就绪'
                 Install = @{
-                    Kind = 'node-portable'   # 内置类型：下载 zip + 解压到 ToolsDir\node-<版本>
+                    Kind = 'node-portable'   # 内置类型：先认系统 node（版本满足即跳过），缺失才下载 zip 解压到 ToolsDir\node-<版本>
                 }
             },
             @{
                 Name = 'n8n 本体'
                 Detect = 'n8n 可执行入口可探测到（便携/本地/全局任意一种）'
                 Install = @{
-                    Kind    = 'npm-install'   # 内置类型：用便携 node 的 npm 安装
-                    Package = 'n8n@2.35.7'    # 无 Prefix 时自包含：装到便携 node 目录 tools\node-<版本>
+                    Kind    = 'npm-install'   # 内置类型：用 node 的 npm 安装
+                    Package = 'n8n@2.35.7'    # 无 Prefix：便携 node 存在装其目录；系统 node 被采用时装 ToolsDir 下
                     # Prefix = '...'          # 可选：指定其它安装位置（如 npm 全局 prefix）
                 }
             },
