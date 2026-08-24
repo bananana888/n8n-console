@@ -53,8 +53,8 @@ function Show-Toast([string]$msg, [bool]$isError = $false) {
 }
 
 function Invoke-ManagedStart {
-    # 正在后台启动/安装，防重复
-    if ($script:_bgJob -or $script:_setupJob) { return }
+    # 正在后台检测/启动/安装，防重复
+    if ($script:_envJob -or $script:_bgJob -or $script:_setupJob) { return }
 
     $s = Get-ManagedStatus
     if ($s.Running) {
@@ -62,16 +62,71 @@ function Invoke-ManagedStart {
         return
     }
 
-    # 环境自检：缺依赖则引导自动安装（控制台"工具箱"能力）
-    $missing = Test-SetupNeeded
-    if ($missing.Count -gt 0) {
-        $names = ($missing | ForEach-Object { $_.Name }) -join "、"
-        if (Show-YesNo "检测到缺少环境: $names`n`n需要自动安装，是否继续？") {
-            Start-SetupJob
-        }
+    # 环境自检放后台 runspace：Test-SetupNeeded 会执行 node --version / npm root -g
+    # 等外部命令，若在主线程同步跑会冻结 UI，表现为"点启动明显卡顿"。
+    Start-EnvCheck
+}
+
+# 后台环境检测（不阻塞 UI；完成后由 Test-EnvCheckDone 在 UI 线程决策）
+function Start-EnvCheck {
+    if ($script:_envJob) { return }
+
+    # 立即反馈"检测中"（金色呼吸，同安装/启动中）
+    $script:StateRunning = $true
+    $script:StatePort = $false
+    $script:_lblState.Text = "检测中..."
+    $script:_lblState.ForeColor = [System.Drawing.Color]::FromArgb(180, 130, 0)
+    $script:_lblDetail.Text = "正在检查运行环境..."
+    $script:_lblUptime.Text = "运行时长: --"
+    if ($script:_dot) { $script:_dot.Invalidate($true) }
+
+    $homeDir = $script:Config.Paths.Home
+    $ps = [System.Management.Automation.PowerShell]::Create()
+    [void]$ps.AddScript(". '$homeDir\lib\config.ps1'")
+    [void]$ps.AddScript("`$script:Config = Get-Config -Root '$homeDir' -ConfigFile '$($script:Config.ConfigFile)'")
+    [void]$ps.AddScript(". '$homeDir\lib\logging.ps1'")
+    [void]$ps.AddScript(". '$homeDir\lib\setup.ps1'")
+    [void]$ps.AddScript("`$m = Test-SetupNeeded; Write-Output (`$m | ForEach-Object { `$_.Name })")
+    $script:_envJob = $ps
+    $script:_envHandle = $ps.BeginInvoke()
+
+    if (-not $script:_envTimer) {
+        $script:_envTimer = New-Object System.Windows.Forms.Timer
+        $script:_envTimer.Interval = 300
+        $script:_envTimer.Add_Tick({ Test-EnvCheckDone })
+    }
+    $script:_envTimer.Start()
+}
+
+# 后台环境检测完成回调（UI 线程）：环境就绪 → 直接启动；缺失 → 确认后安装
+function Test-EnvCheckDone {
+    if (-not $script:_envJob) { return }
+    if (-not $script:_envHandle -or -not $script:_envHandle.IsCompleted) { return }
+
+    $missing = @()
+    try {
+        $results = $script:_envJob.EndInvoke($script:_envHandle)
+        if ($results) { $missing = @($results | ForEach-Object { [string]$_ }) }
+    } catch {
+        Write-FatalLog "环境检测异常: $($_.Exception.Message)"
+    } finally {
+        try { $script:_envJob.Dispose() } catch { }
+        $script:_envJob = $null
+        $script:_envHandle = $null
+        if ($script:_envTimer) { $script:_envTimer.Stop() }
+    }
+
+    if ($missing.Count -eq 0) {
+        # 环境就绪，直接启动
+        Start-BackgroundService
         return
     }
-    Start-BackgroundService
+    $names = $missing -join "、"
+    if (Show-YesNo "检测到缺少环境: $names`n`n需要自动安装，是否继续？") {
+        Start-SetupJob
+    } else {
+        Refresh-UI
+    }
 }
 
 # 环境就绪后的正常启动（后台 runspace，UI 不冻结）
@@ -152,11 +207,18 @@ function Test-SetupProgress {
     if ($p.running) {
         if ($script:_lblSetup) { $script:_lblSetup.Text = "$($p.stepName) - $($p.message)" }
         if ($p.mode -eq 'marquee') {
-            if ($script:_pbSetup) { $script:_pbSetup.Style = 'Marquee' }
+            # 只在模式变化时 Set Style：每 500ms 反复 Set 会不断重启 Marquee 动画，
+            # 视觉上"进度条没动"（历史实测 bug）
+            if ($script:_pbSetup -and $script:_pbSetup.Style -ne [System.Windows.Forms.ProgressBarStyle]::Marquee) {
+                $script:_pbSetup.Style = [System.Windows.Forms.ProgressBarStyle]::Marquee
+            }
         } else {
             if ($script:_pbSetup) {
-                $script:_pbSetup.Style = 'Continuous'
-                $script:_pbSetup.Value = [int]$p.percent
+                if ($script:_pbSetup.Style -ne [System.Windows.Forms.ProgressBarStyle]::Continuous) {
+                    $script:_pbSetup.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+                }
+                $pct = [int]$p.percent
+                if ($script:_pbSetup.Value -ne $pct) { $script:_pbSetup.Value = $pct }
             }
         }
         return
@@ -227,9 +289,13 @@ function Test-BgJobDone {
 }
 
 function Invoke-ManagedStop {
-    # 启动中不允许停止
+    # 启动中/检测中不允许停止
     if ($script:_bgJob) {
         Show-Toast "正在启动中，请稍候..."
+        return
+    }
+    if ($script:_envJob) {
+        Show-Toast "正在检测环境，请稍候..."
         return
     }
     $s = Get-ManagedStatus
@@ -413,6 +479,17 @@ function Refresh-UI {
         $script:StatePort = $false
         return
     }
+    if ($script:_envJob) {
+        # 正在后台检测环境：显示"检测中"（金色呼吸），不覆盖
+        $script:StateRunning = $true
+        $script:StatePort = $false
+        $script:_lblState.Text = "检测中..."
+        $script:_lblState.ForeColor = [System.Drawing.Color]::FromArgb(180, 130, 0)
+        $script:_lblDetail.Text = "正在检查运行环境..."
+        $script:_lblUptime.Text = "运行时长: --"
+        if ($script:_dot) { $script:_dot.Invalidate($true) }
+        return
+    }
     if ($script:_setupJob) {
         # 正在后台安装环境：状态卡显示"安装中"（黄灯，同启动中）
         $script:StateRunning = $true
@@ -478,7 +555,15 @@ function Show-Gui {
             $b = [int](50 + (30 - 50) * $t)
             $script:StateDotColor = [System.Drawing.Color]::FromArgb($r, $g, $b)
         } elseif ($script:StateRunning) {
-            $script:StateDotColor = [System.Drawing.Color]::Gold
+            # 检测中/安装中/启动中：金色呼吸（金↔深金），比固定金色更醒目
+            $phase = ([Environment]::TickCount / 200) % 24
+            $t = $phase / 24.0
+            if ($t -gt 0.5) { $t = 1 - $t }
+            $t = $t * 2
+            $r = [int](235 + (180 - 235) * $t)
+            $g = [int](185 + (115 - 185) * $t)
+            $b = [int](35 + (0 - 35) * $t)
+            $script:StateDotColor = [System.Drawing.Color]::FromArgb($r, $g, $b)
         } else {
             $script:StateDotColor = [System.Drawing.Color]::LightGray
         }
@@ -649,10 +734,15 @@ function Show-Gui {
         if ($script:_bgPollTimer) { try { $script:_bgPollTimer.Stop() } catch { } }
         if ($script:_toastTimer) { try { $script:_toastTimer.Stop() } catch { } }
         if ($script:_setupTimer) { try { $script:_setupTimer.Stop() } catch { } }
+        if ($script:_envTimer) { try { $script:_envTimer.Stop() } catch { } }
         # 后台任务仍在跑则放弃（n8n 进程本身已由独立 runspace 拉起，继续后台运行）
         if ($script:_bgJob) {
             try { $script:_bgJob.Dispose() } catch { }
             $script:_bgJob = $null
+        }
+        if ($script:_envJob) {
+            try { $script:_envJob.Dispose() } catch { }
+            $script:_envJob = $null
         }
         if ($script:_setupJob) {
             try { $script:_setupJob.Dispose() } catch { }

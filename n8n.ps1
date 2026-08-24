@@ -20,7 +20,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$script:AppVersion = '4.0.0'
+$script:AppVersion = '4.1.1'
 
 # ---------- 加载配置（-ConfigFile 支持多实例壳子，默认 n8n.config.psd1）----------
 . (Join-Path $PSScriptRoot "lib\config.ps1")

@@ -125,6 +125,16 @@ function Test-NodeAvailable {
     return $false
 }
 
+# 便携 node 是否就绪（自包含判定）。
+# 与系统是否已有全局 node 无关：便携版初衷是"自带环境"，检测只认
+# tools\node-<版本>\node.exe 是否存在（Install-NodePortable 成功以该文件存在为准）。
+# 不调用外部命令（node --version / npm），避免主线程启动检测被进程冷启动拖慢。
+function Test-PortableNodeReady {
+    $setup = $script:Config.Setup
+    if (-not $setup.Enabled -or [string]::IsNullOrWhiteSpace($setup.NodeVersion)) { return $false }
+    return (Test-Path (Join-Path $setup.ToolsDir "node-$($setup.NodeVersion)\node.exe"))
+}
+
 # ---------- 检测 ----------
 # 返回缺失步骤数组（Setup.Enabled=$false 时返回空 = 无需安装）
 function Test-SetupNeeded {
@@ -142,7 +152,9 @@ function Test-SetupStep {
     $install = $step.Install
     switch ($install.Kind) {
         'node-portable' {
-            return (Test-NodeAvailable)
+            # 只判定便携 node 是否就绪：系统即便有全局 node（版本满足），
+            # 也要按配置下载便携 node，保证"换机器拷贝即用"的自包含特性
+            return (Test-PortableNodeReady)
         }
         'npm-install' {
             # 已装判定用「入口可探测到」：便携/本地/全局任意一种方式装过都算已就绪。
@@ -367,7 +379,10 @@ function Install-NpmPackage {
                     if ($line -match 'fetch.*?([\w@.\-]+\.tgz)') { $lastPkg = $matches[1] }
                 }
             }
-            $msg = if ($lastPkg) { "正在下载依赖包: $lastPkg" } else { "npm install $pkg (可能需要几分钟)..." }
+            # 实时统计已用时间，让提示与实际耗时不脱节（n8n 依赖 2000+，下载通常要几分钟）
+            $el = $sw.Elapsed
+            $timeStr = if ($el.TotalMinutes -ge 1) { "{0} 分 {1} 秒" -f [int]$el.TotalMinutes, $el.Seconds } else { "{0} 秒" -f [int]$el.TotalSeconds }
+            $msg = if ($lastPkg) { "正在下载依赖包: $lastPkg（已用时 $timeStr）" } else { "正在安装 $pkg（已用时 $timeStr，通常需 5-10 分钟）..." }
             Write-SetupProgress @{ running=$true; step=$index; stepCount=$total; stepName=$step.Name; percent=50; message=$msg; mode='marquee' }
             Start-Sleep -Milliseconds 500
         }
