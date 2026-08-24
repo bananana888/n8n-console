@@ -19,6 +19,25 @@ function Test-PortOpen([int]$port, [int]$timeoutMs = 500) {
     }
 }
 
+# 查找监听指定端口的进程 PID（未监听返回 0）。
+# 用于端口被占用时区分"目标服务自身"与"其他程序"，避免误报。
+function Get-PortOwnerProcess([int]$port) {
+    try {
+        $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop | Select-Object -First 1
+        if ($conn -and $conn.OwningProcess -gt 0) { return [int]$conn.OwningProcess }
+    } catch { }
+    # 回退：netstat 解析（无 NetTCPIP 模块的旧系统）
+    try {
+        $line = netstat -ano | Select-String ":$port\s+.*LISTENING" | Select-Object -First 1
+        if ($line) {
+            $parts = ($line.ToString().Trim() -split '\s+')
+            $last = $parts[$parts.Count - 1]
+            if ($last -match '^\d+$') { return [int]$last }
+        }
+    } catch { }
+    return 0
+}
+
 # ---------- 状态文件工具 ----------
 # 读取 PID 文件并判断进程是否存活（须为配置的进程名，防 PID 被系统复用误判）
 function Get-ManagedProcessId {
@@ -122,8 +141,19 @@ function Start-ManagedService {
         return @{ Ok = $false; Message = "$($srv.Name) 已在运行 (PID $existing)。如想重启请先停止。"; PID = 0 }
     }
 
-    # 端口被其他程序占用
+    # 端口被占用：先识别占用者。若是目标服务自身（如上次控制台退出后残留的 n8n
+    # 实例，PID 文件可能已被清空导致状态脱节），不误报"被其他程序占用"，
+    # 而是接管状态管理并提示用户先停止
     if (Test-PortOpen $srv.Port) {
+        $ownerPid = Get-PortOwnerProcess $srv.Port
+        $ownerProc = if ($ownerPid -gt 0) { Get-Process -Id $ownerPid -ErrorAction SilentlyContinue } else { $null }
+        if ($ownerProc -and $ownerProc.ProcessName -eq $srv.ProcessName) {
+            # 占用端口的进程名匹配目标服务（如 node）——大概率就是残留的 n8n 实例。
+            # 把真实 PID 写回状态文件，让控制台接管（状态卡显示运行中，可正常停止）
+            try { $ownerPid | Out-File $script:Config.Paths.PidFile -Encoding ASCII } catch { }
+            Write-CtrlLog "检测到 $($srv.Name) 已在运行(PID $ownerPid)，已接管状态管理"
+            return @{ Ok = $false; Message = "检测到 $($srv.Name) 已在运行 (PID $ownerPid)`n（可能由上次的控制台实例启动后仍在后台运行）。`n如需重启请先点「停止」再启动。"; PID = $ownerPid }
+        }
         $msg = "端口 $($srv.Port) 已被其他程序占用，无法启动 $($srv.Name)。`n请先关闭占用该端口的程序。"
         Write-FatalLog "启动失败: $msg"
         return @{ Ok = $false; Message = $msg; PID = 0 }
@@ -228,11 +258,13 @@ function Start-ManagedService {
             $tail = Get-LogTail
             if (-not $alive) {
                 $msg = "$($srv.Name) 启动失败: 进程已退出。`n`n最近日志:`n$tail`n`n详见: $($script:Config.Paths.StdoutLog)"
+                Clear-StateFiles   # 进程已死：清状态文件
             } else {
                 $msg = "$($srv.Name) 启动超时($($srv.HealthTimeoutSec)秒内健康检查未通过), 进程仍在运行。`n`n最近日志:`n$tail"
+                # 进程仍存活：保留 PID 文件（启动时已写入），避免状态脱节——
+                # 否则下次启动会因 PID 文件为空而误判"端口被其他程序占用"
             }
             Write-FatalLog "启动失败: 健康检查未通过, PID $($proc.Id), 进程存活=$([bool]$alive)"
-            Clear-StateFiles
             return @{ Ok = $false; Message = $msg; PID = $proc.Id; LogTail = $tail }
         }
     } catch {
