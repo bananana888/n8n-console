@@ -20,7 +20,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$script:AppVersion = '4.1.2'
+$script:AppVersion = '4.1.3'
 
 # ---------- 加载配置（-ConfigFile 支持多实例壳子，默认 n8n.config.psd1）----------
 . (Join-Path $PSScriptRoot "lib\config.ps1")
@@ -86,7 +86,8 @@ try {
                 }
             }
             $r = Start-ManagedService
-            if ($r.Ok -and -not $Silent) {
+            # 启动成功 / 检测到已在运行：都自动打开 web UI（Silent 不弹浏览器）
+            if (($r.Ok -or $r.OpenEditor) -and -not $Silent) {
                 try { Start-Process $script:Config.Service.EditorUrl } catch { }
             }
             Show-Msg $r.Message

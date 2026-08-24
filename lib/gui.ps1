@@ -59,6 +59,8 @@ function Invoke-ManagedStart {
     $s = Get-ManagedStatus
     if ($s.Running) {
         Show-Toast "$($script:Config.Service.Name) 已在运行 (PID $($s.PID))"
+        # 已在运行：点「启动」的意图就是访问 web UI，直接打开
+        try { Start-Process $script:Config.Service.EditorUrl } catch { }
         return
     }
 
@@ -278,9 +280,10 @@ function Test-BgJobDone {
         if ($script:_bgPollTimer) { $script:_bgPollTimer.Stop() }
     }
 
-    if ($r -and $r.Ok) {
+    if ($r -and ($r.Ok -or $r.OpenEditor)) {
+        # 启动成功 / 接管了已在运行的实例：都自动打开 web UI
         try { Start-Process $script:Config.Service.EditorUrl } catch { }
-        Show-Toast $r.Message
+        Show-Toast $r.Message (-not ($r.Ok -or $r.OpenEditor))
     } else {
         $msg = if ($r) { $r.Message } else { "启动失败（无返回）" }
         Show-Toast $msg $true

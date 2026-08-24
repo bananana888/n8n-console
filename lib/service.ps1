@@ -138,7 +138,7 @@ function Start-ManagedService {
     # 已在运行
     $existing = Get-ManagedProcessId
     if ($existing -gt 0) {
-        return @{ Ok = $false; Message = "$($srv.Name) 已在运行 (PID $existing)。如想重启请先停止。"; PID = 0 }
+        return @{ Ok = $false; Message = "$($srv.Name) 已在运行 (PID $existing)。如想重启请先停止。"; PID = 0; OpenEditor = $true }
     }
 
     # 端口被占用：先识别占用者。若是目标服务自身（如上次控制台退出后残留的 n8n
@@ -152,7 +152,7 @@ function Start-ManagedService {
             # 把真实 PID 写回状态文件，让控制台接管（状态卡显示运行中，可正常停止）
             try { $ownerPid | Out-File $script:Config.Paths.PidFile -Encoding ASCII } catch { }
             Write-CtrlLog "检测到 $($srv.Name) 已在运行(PID $ownerPid)，已接管状态管理"
-            return @{ Ok = $false; Message = "检测到 $($srv.Name) 已在运行 (PID $ownerPid)`n（可能由上次的控制台实例启动后仍在后台运行）。`n如需重启请先点「停止」再启动。"; PID = $ownerPid }
+            return @{ Ok = $false; Message = "检测到 $($srv.Name) 已在运行 (PID $ownerPid)`n（可能由上次的控制台实例启动后仍在后台运行）。`n如需重启请先点「停止」再启动。"; PID = $ownerPid; OpenEditor = $true }
         }
         $msg = "端口 $($srv.Port) 已被其他程序占用，无法启动 $($srv.Name)。`n请先关闭占用该端口的程序。"
         Write-FatalLog "启动失败: $msg"
