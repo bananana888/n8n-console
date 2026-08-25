@@ -1,5 +1,10 @@
 # 更新日志
 
+## [4.2.2] - 2026-08-25
+
+- **卸载图形化（双击弹窗）**：`uninstall.ps1` 无参数时弹出 WinForms 卸载窗口——勾选 5 类删除内容 + 二次确认 + 开始卸载 + 结果逐项展示；新增「卸载 n8n 控制台.bat」双击入口（隐藏黑框）；参数模式（`-Console`/`-Cache`/`-Portable`/`-GlobalN8n`/`-Data`/`-Force`/`-WhatIf`）完整保留，供自动化
+- **项目整理（仓库瘦身 ~133MB）**：清理 WiX 打包缓存（`packaging\tools\` 的 wix 工具 + wix311.zip + stage）、`*.wixobj`、`*.wixpdb`、`Components.wxs` 等中间产物，以及 `logs\`/`run\` 运行残留；只保留源码、配置、文档与打包脚本，下次打包 `build.ps1` 自动重新下载 WiX
+
 ## [4.2.1] - 2026-08-24
 
 - **修复启动后网页报 "Cannot GET /"**：全局 n8n 的前端 UI 包（`n8n-editor-ui`）物理缺失，导致前端资源无法加载（后端 `/healthz` 正常、n8n 进程也正常）；补装对应版本（2.35.4）即可恢复

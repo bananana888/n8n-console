@@ -1,7 +1,7 @@
 # n8n 工作交接文档（HANDOFF）
 
-> 生成日期：2026-08-21
-> 交接范围：n8n 本地安装 + 桌面控制台（启停/日志/托盘）
+> 生成日期：2026-08-25（家用机，控制台目录 E:\ProgramFiles\n8n-console）
+> 交接范围：n8n 本地安装 + 桌面控制台（启停/日志/卸载）
 > 阅读对象：后续接手维护的同事
 
 ---
@@ -14,6 +14,7 @@
 - 运行状态实时刷新（PID / 端口 / 运行时长）
 - 系统托盘常驻（关闭窗口最小化到托盘，右键菜单操作）
 - 完整日志体系（n8n 运行日志 / 操作审计 / 错误兜底）
+- **GUI 卸载器（v4.2.2）**：双击「卸载 n8n 控制台.bat」弹窗卸载（勾选 5 类删除内容 + 二次确认 + 结果展示），参数模式保留供自动化
 - **v4.0.0 增强**：多实例壳子（`-ConfigFile` 复用管任意命令行服务）、环境缺失自动安装（窗口内进度条）、一键打包 `setup.exe`/`setup.msi`（装用户目录+快捷方式）、日志轮转、单实例锁；作为开源项目发布（MIT），并提供 `shell-ui` skill 复用整套壳子
 
 **两个独立目录：**
@@ -35,7 +36,7 @@
 |---|---|
 | 操作系统 | Windows 10/11（x64） |
 | Node.js | **必须 >=22.22**。2026-08-21 已把 workbuddy 的 **v22.22.2 置顶回用户 PATH**（此前被 TRAE 自带 v22.16.0 顶掉导致启动即退）；控制台配置另指向 22.22.2 绝对路径双保险。若 PATH 再被顶掉，重开终端/重做置顶即可 |
-| n8n 版本 | 2.35.4 |
+| n8n 版本 | 2.35.7（家用机全局安装 D:\npm-global） |
 | npm 源 | npmmirror 镜像（`D:\APP\n8n\.npmrc` 中配置） |
 | npm 缓存 | `D:\APP\n8n\.npm-cache`（项目内，不污染系统） |
 | n8n 数据目录 | `D:\APP\n8n\.n8n`（SQLite 数据库、凭据密钥、前端缓存） |
@@ -47,46 +48,32 @@
 ## 3. 目录结构
 
 ```
-D:\APP\
-├── n8n\                            ← n8n 本体
-│   ├── node_modules\               应用依赖（1100+ 包）
-│   ├── .n8n\                       n8n 数据：database.sqlite / config(密钥) / .cache\
-│   ├── .npm-cache\                 npm 下载缓存（.npmrc 指定）
-│   ├── .npmrc                      镜像源 + 项目内缓存配置
-│   ├── package.json                npm start/stop/update 脚本
-│   ├── start.bat                   命令行启动备份入口（备选）
-│   └── scripts\                    （空目录，已迁移至控制台）
-│
-└── n8n-console\                    ← 控制台（运维入口，也是开源仓库）
-    ├── n8n.ps1                     主入口（-Action menu/start/stop/status + -Silent + -ConfigFile 多实例）
-    ├── n8n-control.ps1             兼容垫片 → 一行转发 n8n.ps1
-    ├── n8n-console.exe             编译启动器（C#，进程名 n8n-console，桌面快捷方式指向它）
-    ├── n8n.config.psd1             ★ 全部配置外置（路径/端口/healthz/注入 env/日志/Setup 段）
-    ├── example.config.psd1         通用配置模板（复用壳子管其它服务时复制改）
-    ├── lib\
-    │   ├── config.ps1              配置加载 + 默认值合并 + 路径解析（Get-Config -Root 必传）
-    │   ├── logging.ps1             日志函数（轮转，>2MB 滚动保留 3 份）
-    │   ├── service.ps1             纯进程控制（无 UI，返回结构化结果）
-    │   ├── setup.ps1               环境检测 + 自动安装（进度写 run\<实例>.setup.json）
-    │   └── gui.ps1                 WinForms UI（状态卡片/绿灯慢闪/toast/异步启动/安装进度面板）
-    ├── packaging\                  打包脚本（build.ps1 编译 setup.exe+setup.msi；installer.wxs/iss/Bundle.wxs；n8n-console.cs 启动器源码）
-    ├── create_shortcut.py          重建桌面快捷方式（Python + pylnk3）
-    ├── launcher.vbs                vbs 无窗口启动器（备用，默认未使用）
-    ├── assets\n8n.ico              图标（快捷方式 + 安装包）
-    ├── release\                    打包产物（setup.msi / n8n-console-setup.exe，gitignore 排除）
-    ├── logs\
-    │   ├── n8n.log                 n8n 运行输出（N8N_LOG_FILE）
-    │   ├── control.log             操作审计（何时启动/停止/结果）
-    │   ├── error.log               脚本异常兜底
-    │   └── n8n-error.log           n8n 进程 stderr
-    └── run\
-        ├── n8n.pid                 当前运行 PID（无效 PID 会被自愈清理）
-        └── n8n.started             启动时间戳（用于显示运行时长）
-```
+E:\ProgramFiles\n8n-console\        ← 控制台（运维入口，也是开源仓库）
+├── n8n.ps1                         主入口（-Action menu/start/stop/status + -Silent + -ConfigFile 多实例）
+├── n8n-control.ps1                 兼容垫片 → 一行转发 n8n.ps1
+├── n8n-console.exe                 编译启动器（C#，进程名 n8n-console，桌面快捷方式指向它）
+├── n8n.config.psd1                 ★ 全部配置外置（路径/端口/healthz/注入 env/日志/Setup 段）
+├── example.config.psd1             通用配置模板（复用壳子管其它服务时复制改）
+├── uninstall.ps1                   卸载器（无参数弹 GUI 窗口；参数模式供自动化）
+├── 卸载 n8n 控制台.bat             双击入口 → 调 uninstall.ps1（隐藏黑框，弹卸载窗口）
+├── lib\
+│   ├── config.ps1                  配置加载 + 默认值合并 + 路径解析（Get-Config -Root 必传）
+│   ├── logging.ps1                 日志函数（轮转，>2MB 滚动保留 3 份）
+│   ├── service.ps1                 纯进程控制（无 UI，返回结构化结果）
+│   ├── setup.ps1                   环境检测 + 自动安装（进度写 run\<实例>.setup.json）
+│   └── gui.ps1                     WinForms UI（状态卡片/绿灯慢闪/toast/异步启动/安装进度面板）
+├── packaging\                      打包脚本（build.ps1 编译 setup.exe+setup.msi；installer.wxs/Bundle.wxs；n8n-console.cs）
+│   └── tools\                      打包缓存（WiX v3 工具 + stage，可删除，build 时自动重下）
+├── create_shortcut.py              重建桌面快捷方式（Python + pylnk3）
+├── launcher.vbs                    vbs 无窗口启动器（备用，默认未使用）
+├── assets\n8n.ico                  图标（快捷方式 + 安装包）
+├── release\                        打包产物（setup.msi / n8n-console-setup.exe；gitignore 排除，可再生成）
+├── logs\                           运行日志（control.log / error.log / n8n.log；运行自动重建）
+└── run\                            运行时状态（n8n.pid / n8n.started；运行自动重建）
 
----
-
-## 4. 日常使用
+> n8n 本体：家用机为全局安装（D:\npm-global\node_modules\n8n），数据在 ~\.n8n；
+> 公司机旧布局（D:\APP\n8n + D:\APP\n8n-console）已不适用，见第 1 节迁移说明。
+```## 4. 日常使用
 
 ### 启动 / 停止 / 查看状态
 **双击桌面「n8n 控制台」** 快捷方式（指向 `D:\APP\n8n-console\n8n-control.ps1`）→ 弹出控制面板：
@@ -99,6 +86,18 @@ D:\APP\
 | 状态圆点 | 运行中**绿灯慢闪**（呼吸动画）；启动中金色；停止灰色 |
 | 窗口 × | **直接退出控制台**（无托盘常驻）；n8n 若在运行继续后台运行，重开控制台即可管理 |
 
+### 卸载（GUI 卸载器，v4.2.2）
+**双击 `卸载 n8n 控制台.bat`** → 弹出图形卸载窗口，勾选后一键执行：
+| 勾选项 | 说明 |
+|---|---|
+| [1] 控制台程序 | 桌面/开始菜单快捷方式、HKCU 注册、MSI 安装副本 |
+| [2] 运行时缓存 | logs / run / release / 构建产物 / WiX 缓存 |
+| [3] 便携 node+n8n | 当前文件夹 tools\ 下的运行时 |
+| [4] 全局 n8n | npm uninstall -g（D:\npm-global） |
+| [5] n8n 数据 | ~\.n8n（工作流/凭证，不可恢复） |
+
+默认勾选 1、2；点「开始卸载」前有二次确认（勾选 5 时特别警示），删除结果逐项展示。
+参数模式（供自动化，无窗口）：`.\uninstall.ps1 -Console|-Cache|-Portable|-GlobalN8n|-Data [-Force] [-WhatIf]`
 ### 命令行备选（主入口 n8n.ps1；旧 n8n-control.ps1 为垫片仍可调用）
 ```powershell
 powershell -ExecutionPolicy Bypass -File D:\APP\n8n-console\n8n.ps1 -Action start
@@ -128,6 +127,11 @@ powershell -ExecutionPolicy Bypass -File D:\APP\n8n-console\n8n.ps1 -Action stat
 - **打包**（`packaging/build.ps1`）：只依赖 WiX v3（zip 便携，首次联网下载）。编译 `n8n-console.exe` → heat/candle/light 生成 `release/setup.msi` + `n8n-console-setup.exe`（Burn 引导）。MSI 装用户目录（`WixUI_InstallDir` 可选目录）+ 桌面快捷方式 + 开始菜单卸载。**注意 msi 编译须 `-cultures:zh-CN`**（WixUI 中文编码）+ `-sice:ICE38;64;91`（per-user 建议性检查）。
 - **注意**：所有含中文文件为 **UTF-8 BOM** 编码（PS 5.1 中文显示必需，改文件后务必保留 BOM；`head -c3 | xxd -p` 应为 `efbbbf`）
 
+### uninstall.ps1（GUI 卸载器）
+- 无参数 → 弹 WinForms 卸载窗口（勾选类别 + 二次确认 + 停止 n8n + 逐项删除 + 结果 RichTextBox 展示）；有参数 → CLI 模式（v4.2.0 行为，含 `-WhatIf` 预览）
+- 停止 n8n（PID 文件 + 端口占用 + node 命令行匹配）→ 收集目标 → 逐个删除，共享函数 `Stop-RunningN8n` / `Get-UninstallTargets` / `Invoke-Uninstall`
+- PS5.1 事件 handler 沿用 `$this` / `$script:` 模式（同 gui.ps1），不捕获局部变量
+- 「卸载 n8n 控制台.bat」：`powershell -WindowStyle Hidden -File`，双击隐藏黑框直接弹卸载窗口
 ### create_shortcut.py
 - 用 **pylnk3**（纯文件格式）生成 .lnk，不依赖 COM
 - **必须用 `pylnk3.for_file()` 工厂**（内部设 IsUnicode=True）；用低级 API 会因中文导致图标字段错位（历史 bug）
@@ -214,7 +218,9 @@ powershell -ExecutionPolicy Bypass -File D:\APP\n8n-console\packaging\build.ps1
 
 | 日期 | 内容 |
 |---|---|
-| 2026-08-20 | n8n 2.35.4 npm 安装完成（npmmirror 源 + 项目内缓存，绕开 Windows 缓存锁）；修复 4 个解压损坏包 + sqlite3 二进制 |
+| 2026-08-25 | **v4.2.2 卸载图形化 + 项目瘦身**：uninstall.ps1 无参数弹 GUI 卸载窗口（勾选 5 类 + 二次确认 + 结果展示），新增「卸载 n8n 控制台.bat」双击入口；清理 WiX 打包缓存与中间产物 ~133MB（build 自动重下） |
+| 2026-08-24 | v4.2.1 修复启动后 "Cannot GET /"（全局 n8n 前端包 n8n-editor-ui 物理缺失，补装恢复）+ 健康检查等前端就绪；v4.2.0 安装检测「先系统后便携」+ 卸载分级菜单 |
+| 2026-08-24 | v4.1.x 系列：静默告警引号修复、安装包版本同步、启动器路径动态化、日志写入兜底、单实例锁加固、端口占用接管、前端等待 || 2026-08-20 | n8n 2.35.4 npm 安装完成（npmmirror 源 + 项目内缓存，绕开 Windows 缓存锁）；修复 4 个解压损坏包 + sqlite3 二进制 |
 | 2026-08-20 | 桌面控制台 v1（菜单/启停/状态 + 日志三件套） |
 | 2026-08-21 | 修复：图标白板（IsUnicode 编码）、启动即死（N8N_RUNNERS_ENABLED=false）、命令行窗口（CreateNoWindow） |
 | 2026-08-21 | 控制台 v2：状态卡片 UI + hover 动画 + 托盘常驻 + 1s 状态刷新 |
