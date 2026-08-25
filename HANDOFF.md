@@ -15,7 +15,7 @@
 - 系统托盘常驻（关闭窗口最小化到托盘，右键菜单操作）
 - 完整日志体系（n8n 运行日志 / 操作审计 / 错误兜底）
 - **GUI 卸载器（v4.2.2）**：双击「卸载 n8n 控制台.bat」弹窗卸载（勾选 5 类删除内容 + 二次确认 + 结果展示），参数模式保留供自动化
-- **v4.0.0 增强**：多实例壳子（`-ConfigFile` 复用管任意命令行服务）、环境缺失自动安装（窗口内进度条）、一键打包 `setup.exe`/`setup.msi`（装用户目录+快捷方式）、日志轮转、单实例锁；作为开源项目发布（MIT），并提供 `shell-ui` skill 复用整套壳子
+- **v4.0.0 增强**：多实例壳子（`-ConfigFile` 复用管任意命令行服务）、环境缺失自动安装（窗口内进度条）、一键打包 `setup.exe`/`setup.msi`（装用户目录+快捷方式）、日志轮转、单实例锁；作为开源项目发布（MIT），（注：曾计划沉淀 `shell-ui` skill 复用壳子，未落地，见第 9 节）
 
 **两个独立目录：**
 | 目录 | 内容 | 职责 |
@@ -236,7 +236,7 @@ powershell -ExecutionPolicy Bypass -File D:\APP\n8n-console\packaging\build.ps1
 | 2026-08-21 | **打包发布**：`packaging/build.ps1` 生成 `release\setup.msi` + `n8n-console-setup.exe`（WiX v3 + Burn）；README/LICENSE(MIT)/CHANGELOG/.gitignore；推 GitHub `bananana888/n8n-`，tag `v4.0.0` |
 | 2026-08-21 | **C# 启动器**：`n8n-console.exe`（csc 编译 + /win32icon 图标），进程名 n8n-console 而非 powershell，窗口标题=服务名 |
 | 2026-08-21 | **安装包 5 修复**：exe 嵌图标、MSI 目录选择 UI（WixUI_InstallDir + -cultures:zh-CN）、安装中黄灯、开始菜单卸载、Setup 安装超时（InstallTimeoutSec） |
-| 2026-08-21 | **`shell-ui` skill**（`~/.claude/skills/shell-ui/`）：整套壳子沉淀为 skill，为任意命令行服务套 UI 壳子（复制 templates + 适配配置） |
+| 2026-08-21 | **`shell-ui` skill（未落地）**：曾计划把整套壳子沉淀为 skill 供复用（`~/.claude/skills/shell-ui/`），但文件从未创建；本仓库 `n8n.ps1 + lib\` 即通用壳子模板，可直接复制适配 |
 
 ---
 
@@ -244,6 +244,6 @@ powershell -ExecutionPolicy Bypass -File D:\APP\n8n-console\packaging\build.ps1
 
 - 控制台入口：`D:\APP\n8n-console\n8n-console.exe`（编译启动器，桌面快捷方式指向它）；脚本入口 `n8n.ps1`
 - **唯一需要常改的运维文件：`D:\APP\n8n-console\n8n.config.psd1`**
-- **复用壳子**：`~/.claude/skills/shell-ui/`（skill）——为任意命令行服务套 UI 壳子，Claude 说"给 X 套个壳"自动加载
+- **复用壳子**：shell-ui skill 未落地（`~/.claude/skills/shell-ui/` 从未创建），不再引用；要套壳参考本仓库 `n8n.ps1 + lib\{config,logging,service,gui}.ps1 + n8n.config.psd1` 结构复制适配
 - 遇到 JIT 调试弹窗/异常：**不要关闭**，把"异常文本"整段复制发维护者
 - 本机安全软件：卡巴斯基 Endpoint Security（影响 vbs 启动方案，见 7.2）
